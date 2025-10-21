@@ -1,0 +1,32 @@
+{
+  "name": "dclimate-client-js",
+  "version": "0.1.0",
+  "description": "JavaScript client for dClimate datasets using jaxray and IPFS sharded stores",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "dclimate",
+    "zarr",
+    "ipfs",
+    "jaxray",
+    "climate-data"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@dclimate/jaxray": "^0.1.2"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
