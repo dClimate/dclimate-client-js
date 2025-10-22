@@ -28,12 +28,6 @@ export class DClimateClient {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
   }
 
-  setGatewayUrl(nextGateway: string) {
-    this.gatewayUrl = nextGateway;
-    this.cachedGateway = undefined;
-    this.cachedIpfs = undefined;
-  }
-
   listAvailableDatasets(): string[] {
     return listDatasetKeys();
   }
