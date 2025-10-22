@@ -1,4 +1,4 @@
-import staticCatalog from "./static-catalog.json" assert { type: "json" };
+import staticCatalog from "./static-catalog.json" with { type: "json" };
 import {
   CatalogUnavailableError,
   DatasetNotFoundError,
