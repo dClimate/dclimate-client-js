@@ -2,12 +2,13 @@
 # yarn lockfile v1
 
 
-"@dclimate/jaxray@^0.1.2":
-  version "0.1.2"
-  resolved "https://registry.yarnpkg.com/@dclimate/jaxray/-/jaxray-0.1.2.tgz#b6008dbb3beb1f7039272ff5cff28e6f41c96508"
-  integrity sha512-S+Ad7pG5LdRJNkV08flM/TySfEfESQcdDEFPy1iyiDCXPhxd9Ig9HYL1zD1QDrkrJXve5uDKHh+LJxiXrdb7fA==
+"@dclimate/jaxray@^0.2.1":
+  version "0.2.1"
+  resolved "https://registry.yarnpkg.com/@dclimate/jaxray/-/jaxray-0.2.1.tgz#38cb74b149c07e92804ee950d1ceb29c7088bdaf"
+  integrity sha512-ANrgiT3TFsndEyeSR6nZ+1TgKOTwCUXvpm/U7TGgmhKJagoirKQ/Z+SEOYMXY1vJujkWWj/KGA25odQDb2skcQ==
   dependencies:
     "@ipld/dag-cbor" "^9.2.5"
+    "@noble/hashes" "^2.0.1"
     it-all "^1.0.6"
     multiformats "^13.3.1"
     uint8arrays "^5.1.0"
@@ -155,6 +156,11 @@
   version "1.5.5"
   resolved "https://registry.yarnpkg.com/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz#6912b00d2c631c0d15ce1a7ab57cd657f2a8f8ba"
   integrity sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==
+
+"@noble/hashes@^2.0.1":
+  version "2.0.1"
+  resolved "https://registry.yarnpkg.com/@noble/hashes/-/hashes-2.0.1.tgz#fc1a928061d1232b0a52bb754393c37a5216c89e"
+  integrity sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw==
 
 "@rollup/rollup-android-arm-eabi@4.52.5":
   version "4.52.5"

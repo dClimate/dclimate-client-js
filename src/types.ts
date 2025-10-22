@@ -1,24 +1,10 @@
-export type CatalogMap = Record<string, string>;
-
-export interface CatalogResolverOptions {
-  endpoint?: string;
-  fetcher?: typeof fetch;
-  staticCatalog?: CatalogMap;
-  /** When true, the resolver will attempt to refresh the remote catalog once per process. */
-  autoRefresh?: boolean;
-}
-
-export interface ClientOptions extends CatalogResolverOptions {
+export interface ClientOptions {
   gatewayUrl?: string;
+  fetcher?: typeof fetch;
 }
 
 export interface LoadDatasetOptions {
   cid?: string;
-  /**
-   * Optional pre-resolved CID path such as "collection-dataset-finalized".
-   * When provided, the resolver will skip inferring from collection/dataset inputs.
-   */
-  path?: string;
   gatewayUrl?: string;
   signal?: AbortSignal;
 }

@@ -6,7 +6,7 @@ The goal is to mirror the functionality of the Python `dclimate-zarr-client` pac
 
 ## Features
 
-- Catalog resolver that can read from a bundled static map or the remote `dclimate-data-cids` JSON.
+- Dataset loader backed by a curated dataset-to-endpoint map that fetches the latest CID on demand.
 - Thin IPFS loader powered by `jaxray`'s `ShardedStore` implementation.
 - `GeoTemporalDataset` wrapper with convenience helpers (`point`, `timeRange`, chained selections).
 - No blockchain/Web3 code – all resolution happens through static/HTTP sources.
@@ -58,7 +58,7 @@ const subset = await client.selectDataset(
 
 ## Configuration
 
-- **Catalog source** – pass `staticCatalog` or `endpoint` to the `DClimateClient` constructor to override the defaults.
+- **Dataset map** – only datasets listed in the built-in map are supported. Use `listAvailableDatasets()` to inspect the keys.
 - **Gateway** – set `gatewayUrl` on the client or per call inside `loadDataset`.
 - **Direct CID access** – supply `cid` in `LoadDatasetOptions` to skip catalog resolution entirely.
 

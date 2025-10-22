@@ -1,7 +1,8 @@
-import { Dataset, ShardedStore, createIpfsElements } from "@dclimate/jaxray";
+import { Dataset, openIpfsStore } from "@dclimate/jaxray";
+import type { IPFSELEMENTS_INTERFACE } from "@dclimate/jaxray";
 import { DEFAULT_IPFS_GATEWAY } from "../constants.js";
 
-export type IpfsElements = ReturnType<typeof createIpfsElements>;
+export type IpfsElements = IPFSELEMENTS_INTERFACE;
 
 export interface OpenDatasetOptions {
   gatewayUrl?: string;
@@ -17,9 +18,10 @@ export async function openDatasetFromCid(
   }
 
   const gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
-  const ipfsElements =
-    options.ipfsElements ?? createIpfsElements(gatewayUrl);
+  const { store } = await openIpfsStore(
+    cid,
+    options.ipfsElements ?? { gatewayUrl }
+  );
 
-  const store = await ShardedStore.open(cid, ipfsElements);
   return Dataset.open_zarr(store);
 }

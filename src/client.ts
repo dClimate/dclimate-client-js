@@ -1,5 +1,4 @@
 import { createIpfsElements } from "@dclimate/jaxray";
-import { CatalogResolver } from "./catalog/cid-resolver.js";
 import { GeoTemporalDataset } from "./geotemporal-dataset.js";
 import {
   ClientOptions,
@@ -11,23 +10,24 @@ import {
 import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
 import { DatasetNotFoundError } from "./errors.js";
-import { buildCatalogCandidates } from "./utils.js";
+import { normalizeSegment } from "./utils.js";
+import { getDatasetEndpoint, listDatasetKeys } from "./datasets.js";
 
-function inferPathFromRequest(
-  request: DatasetRequest
-): string {
-  return buildCatalogCandidates(request, {})[0] ?? request.dataset;
+interface DatasetApiResponse {
+  dataset?: string;
+  cid?: string;
+  timestamp?: number;
 }
 
 export class DClimateClient {
-  private readonly resolver: CatalogResolver;
+  private readonly fetcher?: typeof fetch;
   private gatewayUrl: string;
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
-    this.resolver = new CatalogResolver(options);
+    this.fetcher = options.fetcher ?? (globalThis.fetch as typeof fetch | undefined);
   }
 
   setGatewayUrl(nextGateway: string) {
@@ -36,12 +36,12 @@ export class DClimateClient {
     this.cachedIpfs = undefined;
   }
 
-  listCatalogEntries(): string[] {
-    return this.resolver.listKnownDatasets();
+  listAvailableDatasets(): string[] {
+    return listDatasetKeys();
   }
 
-  clearCatalogCache() {
-    this.resolver.clearCache();
+  listCatalogEntries(): string[] {
+    return this.listAvailableDatasets();
   }
 
   async loadDataset(
@@ -49,26 +49,22 @@ export class DClimateClient {
     options: LoadDatasetOptions = {}
   ): Promise<GeoTemporalDataset> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
+    const datasetKey = normalizeSegment(request.dataset);
+
+    if (!datasetKey) {
+      throw new DatasetNotFoundError("Dataset name must be provided.");
+    }
 
     let cid: string;
-    let path: string;
+    let resolvedPath: string;
 
     if (options.cid) {
       cid = options.cid;
-      path = options.path ?? inferPathFromRequest(request);
+      resolvedPath = datasetKey;
     } else {
-      const result = await this.resolver.resolveDataset(request, {
-        path: options.path,
-        signal: options.signal,
-      });
+      const result = await this.fetchDatasetCid(datasetKey, options.signal);
       cid = result.cid;
-      path = result.path;
-    }
-
-    if (!cid) {
-      throw new DatasetNotFoundError(
-        `Unable to resolve CID for dataset "${request.dataset}".`
-      );
+      resolvedPath = result.path ?? datasetKey;
     }
 
     const dataset = await openDatasetFromCid(cid, {
@@ -80,7 +76,7 @@ export class DClimateClient {
       dataset: request.dataset,
       collection: request.collection,
       variant: request.variant ?? "",
-      path,
+      path: resolvedPath,
       cid,
       fetchedAt: new Date(),
     };
@@ -95,6 +91,48 @@ export class DClimateClient {
   ): Promise<GeoTemporalDataset> {
     const dataset = await this.loadDataset(request, options);
     return dataset.select(selection);
+  }
+
+  private async fetchDatasetCid(
+    datasetKey: string,
+    signal?: AbortSignal
+  ): Promise<{ cid: string; path: string }> {
+    const fetcher = this.fetcher;
+    if (!fetcher) {
+      throw new DatasetNotFoundError("Fetch implementation is not available.");
+    }
+
+    const endpoint = getDatasetEndpoint(datasetKey);
+    if (!endpoint) {
+      throw new DatasetNotFoundError(
+        `Dataset "${datasetKey}" is not registered in the dataset map.`
+      );
+    }
+
+    const response = await fetcher(endpoint, { signal });
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new DatasetNotFoundError(
+          `Dataset "${datasetKey}" was not found at "${endpoint}".`
+        );
+      }
+
+      throw new DatasetNotFoundError(
+        `Failed to fetch dataset "${datasetKey}" (status ${response.status}).`
+      );
+    }
+
+    const payload = (await response.json()) as DatasetApiResponse;
+    const cid = payload?.cid?.trim();
+    if (!cid) {
+      throw new DatasetNotFoundError(
+        `Dataset endpoint "${endpoint}" did not provide a CID for "${datasetKey}".`
+      );
+    }
+
+    const resolvedPath = payload?.dataset?.trim().toLowerCase() || datasetKey;
+
+    return { cid, path: resolvedPath };
   }
 
   private getIpfsElements(gatewayUrl: string): IpfsElements {
