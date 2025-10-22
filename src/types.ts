@@ -1,12 +1,10 @@
 export interface ClientOptions {
   gatewayUrl?: string;
-  fetcher?: typeof fetch;
 }
 
 export interface LoadDatasetOptions {
   cid?: string;
   gatewayUrl?: string;
-  signal?: AbortSignal;
 }
 
 export interface PointQueryOptions {

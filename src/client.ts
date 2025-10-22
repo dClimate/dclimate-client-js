@@ -11,7 +11,7 @@ import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
 import { DatasetNotFoundError } from "./errors.js";
 import { normalizeSegment } from "./utils.js";
-import { getDatasetEndpoint, listDatasetKeys } from "./datasets.js";
+import { DatasetKey, getDatasetEndpoint, listDatasetKeys } from "./datasets.js";
 
 interface DatasetApiResponse {
   dataset?: string;
@@ -20,14 +20,12 @@ interface DatasetApiResponse {
 }
 
 export class DClimateClient {
-  private readonly fetcher?: typeof fetch;
   private gatewayUrl: string;
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
-    this.fetcher = options.fetcher ?? (globalThis.fetch as typeof fetch | undefined);
   }
 
   setGatewayUrl(nextGateway: string) {
@@ -62,7 +60,7 @@ export class DClimateClient {
       cid = options.cid;
       resolvedPath = datasetKey;
     } else {
-      const result = await this.fetchDatasetCid(datasetKey, options.signal);
+      const result = await this.fetchDatasetCid(datasetKey);
       cid = result.cid;
       resolvedPath = result.path ?? datasetKey;
     }
@@ -94,22 +92,16 @@ export class DClimateClient {
   }
 
   private async fetchDatasetCid(
-    datasetKey: string,
-    signal?: AbortSignal
+    datasetKey: string
   ): Promise<{ cid: string; path: string }> {
-    const fetcher = this.fetcher;
-    if (!fetcher) {
-      throw new DatasetNotFoundError("Fetch implementation is not available.");
-    }
-
-    const endpoint = getDatasetEndpoint(datasetKey);
+    const endpoint = getDatasetEndpoint(datasetKey as DatasetKey);
     if (!endpoint) {
       throw new DatasetNotFoundError(
         `Dataset "${datasetKey}" is not registered in the dataset map.`
       );
     }
 
-    const response = await fetcher(endpoint, { signal });
+    const response = await fetch(endpoint);
     if (!response.ok) {
       if (response.status === 404) {
         throw new DatasetNotFoundError(

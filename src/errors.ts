@@ -5,12 +5,8 @@ export class DClimateClientError extends Error {
   }
 }
 
-export class CatalogUnavailableError extends DClimateClientError {}
-
 export class DatasetNotFoundError extends DClimateClientError {}
 
 export class InvalidSelectionError extends DClimateClientError {}
-
-export class SelectionTooLargeError extends DClimateClientError {}
 
 export class NoDataFoundError extends DClimateClientError {}
