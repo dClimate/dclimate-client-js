@@ -10,6 +10,7 @@ import {
   TimeRange,
 } from "./types.js";
 import { normalizeTimeRange, normalizeSegment } from "./utils.js";
+import { points as pointsShape, circle as circleShape, rectangle as rectangleShape } from "./shapes/index.js";
 
 type SelectionMethod = Parameters<Dataset["sel"]>[1] extends infer Options
   ? Options extends { method?: infer Method }
@@ -72,13 +73,25 @@ export class GeoTemporalDataset {
   async select(options: GeoSelectionOptions): Promise<GeoTemporalDataset> {
     let current: GeoTemporalDataset = this;
 
-    if (options.timeRange) {
-      current = await current.timeRange(options.timeRange);
-    }
-
+    // Apply selections in order: point first, then time range
+    // Point selection must come first because it changes the dataset structure
     if (options.point) {
       const { latitude, longitude, options: pointOptions } = options.point;
       current = await current.point(latitude, longitude, pointOptions);
+    }
+
+    // Then apply time range using the potentially-modified dataset
+    if (options.timeRange) {
+      try {
+        current = await current.timeRange(options.timeRange);
+      } catch (error) {
+        // If time range selection fails after point selection,
+        // return the point selection result (dataset may not have time dimension)
+        if (options.point && error instanceof InvalidSelectionError) {
+          return current;
+        }
+        throw error;
+      }
     }
 
     return current;
@@ -116,10 +129,23 @@ export class GeoTemporalDataset {
     range: TimeRange,
     dimension = "time"
   ): Promise<GeoTemporalDataset> {
-    const coords = this.dataset.coords[dimension];
+    // Try to find the time dimension if it's not the default "time"
+    let timeDimension = dimension;
+    if (!(timeDimension in this.dataset.coords)) {
+      // Try common time dimension names
+      const possibleTimeDimensions = ["time", "t", "date", "datetime"];
+      for (const candidate of possibleTimeDimensions) {
+        if (candidate in this.dataset.coords) {
+          timeDimension = candidate;
+          break;
+        }
+      }
+    }
+
+    const coords = this.dataset.coords[timeDimension];
     if (!coords || !Array.isArray(coords) || coords.length === 0) {
       throw new InvalidSelectionError(
-        `Coordinate "${dimension}" not found in dataset.`
+        `Coordinate "${timeDimension}" not found in dataset.`
       );
     }
 
@@ -135,11 +161,11 @@ export class GeoTemporalDataset {
     }
 
     const subset = await this.dataset.sel({
-      [dimension]: {
+      [timeDimension]: {
         start: normalizedRange.start as any,
         stop: normalizedRange.end as any,
       },
-    });
+    }, { method: "nearest" });
     const wrapped = new GeoTemporalDataset(subset, this.metadata);
     wrapped.ensureHasData();
     return wrapped;
@@ -177,5 +203,71 @@ export class GeoTemporalDataset {
       selectionOptions.tolerance = options.tolerance;
     }
     return selectionOptions;
+  }
+
+  /**
+   * Select data at specific point coordinates
+   *
+   * @param pointLats - Array of latitude coordinates
+   * @param pointLons - Array of longitude coordinates
+   * @param options - Configuration options (epsgCrs, snapToGrid, tolerance, latitudeKey, longitudeKey)
+   * @returns A new Dataset with data at the specified points
+   */
+  async points(
+    pointLats: number[],
+    pointLons: number[],
+    options?: {
+      epsgCrs?: number;
+      snapToGrid?: boolean;
+      tolerance?: number;
+      latitudeKey?: string;
+      longitudeKey?: string;
+    }
+  ): Promise<Dataset> {
+    return await pointsShape(this.dataset, pointLats, pointLons, options);
+  }
+
+  /**
+   * Select data within a circular region
+   *
+   * @param centerLat - Latitude of circle center
+   * @param centerLon - Longitude of circle center
+   * @param radiusKm - Radius in kilometers
+   * @param options - Configuration options (latitudeKey, longitudeKey)
+   * @returns A new Dataset with data within the circular region
+   */
+  async circle(
+    centerLat: number,
+    centerLon: number,
+    radiusKm: number,
+    options?: {
+      latitudeKey?: string;
+      longitudeKey?: string;
+    }
+  ): Promise<Dataset> {
+    return await circleShape(this.dataset, centerLat, centerLon, radiusKm, options);
+  }
+
+  /**
+   * Select data within a rectangular region
+   *
+   * @param minLat - Southern latitude boundary
+   * @param minLon - Western longitude boundary
+   * @param maxLat - Northern latitude boundary
+   * @param maxLon - Eastern longitude boundary
+   * @param options - Configuration options (latitudeKey, longitudeKey)
+   * @returns A new Dataset with data within the rectangular region
+   */
+  async rectangle(
+    minLat: number,
+    minLon: number,
+    maxLat: number,
+    maxLon: number,
+    options?: {
+      latitudeKey?: string;
+      longitudeKey?: string;
+    }
+  ): Promise<Dataset> {
+    return await rectangleShape(this.dataset, minLat, minLon, maxLat, maxLon, options);
   }
 }

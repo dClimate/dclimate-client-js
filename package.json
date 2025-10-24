@@ -32,7 +32,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@dclimate/jaxray": "^0.2.1"
+    "@dclimate/jaxray": "^0.3.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

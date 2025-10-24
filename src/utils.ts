@@ -1,7 +1,24 @@
 import type { TimeRange } from "./types.js";
+import { Dataset } from "@dclimate/jaxray";
 
 export function normalizeSegment(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+/**
+ * Check if a Dataset is empty (no data variables or all dimensions have size 0)
+ * @param dataset - The Dataset to check
+ * @returns true if the dataset has no data or any dimension has size 0
+ */
+export function isDatasetEmpty(dataset: Dataset): boolean {
+  // No data variables
+  if (dataset.dataVars.length === 0) {
+    return true;
+  }
+
+  // Check if any dimension has size 0
+  const sizes = dataset.sizes;
+  return Object.values(sizes).some((size) => size === 0);
 }
 
 function toDate(value: Date | string): Date | null {
