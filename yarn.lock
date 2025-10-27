@@ -2,10 +2,10 @@
 # yarn lockfile v1
 
 
-"@dclimate/jaxray@^0.3.0":
-  version "0.3.0"
-  resolved "https://registry.yarnpkg.com/@dclimate/jaxray/-/jaxray-0.3.0.tgz#5421cd07b7f9f5821d4aacd8d1099b88e9032b72"
-  integrity sha512-oog1wS/swfQW6FOxXg9mbX9QY7wfwlNhN7/rBWAin7u8TXYzn0xo4W+vEdnAQk3Z5Uirvs6BO8EOy4VIII4Wpw==
+"@dclimate/jaxray@^0.4.0":
+  version "0.4.0"
+  resolved "https://registry.yarnpkg.com/@dclimate/jaxray/-/jaxray-0.4.0.tgz#9d67a1a6735422443454949aa9efdf1862843cc4"
+  integrity sha512-ypfEPMtvM5FSmssEBp/d0YQb7dGZmCs3XYC1ul3dSDvoycPrKDDvHex/u3FCdeEKsiN0gmTfrQwqnUoUqfUgyg==
   dependencies:
     "@ipld/dag-cbor" "^9.2.5"
     "@noble/hashes" "^2.0.1"

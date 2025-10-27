@@ -1,4 +1,4 @@
-import { createIpfsElements } from "@dclimate/jaxray";
+import { createIpfsElements, Dataset } from "@dclimate/jaxray";
 import { GeoTemporalDataset } from "./geotemporal-dataset.js";
 import {
   ClientOptions,
@@ -38,8 +38,9 @@ export class DClimateClient {
 
   async loadDataset(
     request: DatasetRequest,
-    options: LoadDatasetOptions = {}
-  ): Promise<GeoTemporalDataset> {
+    options: LoadDatasetOptions = {},
+    returnJaxrayDataset = false,
+  ): Promise<GeoTemporalDataset | Dataset> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const datasetKey = normalizeSegment(request.dataset);
 
@@ -64,6 +65,10 @@ export class DClimateClient {
       ipfsElements: this.getIpfsElements(gatewayUrl),
     });
 
+    if (returnJaxrayDataset) {
+      return dataset;
+    }
+
     const metadata: DatasetMetadata = {
       dataset: request.dataset,
       collection: request.collection,
@@ -79,9 +84,13 @@ export class DClimateClient {
   async selectDataset(
     request: DatasetRequest,
     selection: GeoSelectionOptions,
-    options: LoadDatasetOptions = {}
-  ): Promise<GeoTemporalDataset> {
-    const dataset = await this.loadDataset(request, options);
+    options: LoadDatasetOptions = {},
+    returnJaxrayDataset = false,
+  ): Promise<GeoTemporalDataset | Dataset> {
+    const dataset = await this.loadDataset(request, options, returnJaxrayDataset);
+    if (!(dataset instanceof GeoTemporalDataset)) {
+      return dataset;
+    }
     return dataset.select(selection);
   }
 

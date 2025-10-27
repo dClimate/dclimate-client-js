@@ -47,7 +47,7 @@ describe("DClimateClient usage", () => {
       start: "2023-01-01T00:00:00Z",
       end: "2023-01-07T00:00:00Z",
     });
-    const records = slice.toRecords("precipitation");
+    const records = await slice.toRecords("precipitation");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(

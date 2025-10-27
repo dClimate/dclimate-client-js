@@ -38,7 +38,7 @@ const slice = await point.timeRange({
   end: "2023-01-07T00:00:00Z",
 });
 
-console.log(slice.toRecords("precipitation"));
+console.log(await slice.toRecords("precipitation"));
 ```
 
 ### Selecting while loading

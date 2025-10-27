@@ -99,7 +99,9 @@ export class FakeDataset {
     return new FakeDataset(filtered);
   }
 
-  toRecords(variableName: string): Array<Record<CoordinateKey | "value", number | string>> {
+  async toRecords(
+    variableName: string
+  ): Promise<Array<Record<CoordinateKey | "value", number | string>>> {
     if (variableName !== "precipitation") {
       return [];
     }

@@ -20,6 +20,19 @@ type SelectionMethod = Parameters<Dataset["sel"]>[1] extends infer Options
 
 const DEFAULT_LATITUDE_KEYS = ["latitude", "lat", "y"];
 const DEFAULT_LONGITUDE_KEYS = ["longitude", "lon", "lng", "x"];
+const DEFAULT_TIME_KEYS = [
+  "time",
+  "valid_time",
+  "datetime",
+  "date",
+  "forecast_reference_time",
+  "forecast_time",
+  "analysis_time",
+  "initial_time",
+  "verification_time",
+  "step",
+  "t",
+];
 
 export class GeoTemporalDataset {
   constructor(
@@ -51,8 +64,39 @@ export class GeoTemporalDataset {
     return this.dataset.toJSON();
   }
 
-  toRecords(varName: string, options?: { precision?: number }) {
-    return this.dataset.toRecords(varName, options);
+  async toRecords(
+    varName: string,
+    options?: { precision?: number }
+  ): Promise<Array<Record<string, unknown>>> {
+    const datasetAny = this.dataset as unknown as {
+      getVariable?: (name: string) => DataArray | undefined;
+      toRecords?: (
+        name: string,
+        opts?: { precision?: number }
+      ) => Array<Record<string, unknown>> | Promise<Array<Record<string, unknown>>>;
+    };
+
+    if (typeof datasetAny.getVariable === "function") {
+      const variable = datasetAny.getVariable(varName);
+      if (variable) {
+        const materialized =
+          variable.isLazy && typeof variable.compute === "function"
+            ? await variable.compute()
+            : variable;
+        if (typeof materialized.toRecords === "function") {
+          return materialized.toRecords(options) as Array<Record<string, unknown>>;
+        }
+      }
+    }
+
+    if (typeof datasetAny.toRecords === "function") {
+      const result = datasetAny.toRecords(varName, options);
+      return result instanceof Promise ? await result : result;
+    }
+
+    throw new Error(
+      `Dataset cannot be converted to records for variable "${varName}".`
+    );
   }
 
   getVariable(name: string): DataArray {
@@ -129,23 +173,21 @@ export class GeoTemporalDataset {
     range: TimeRange,
     dimension = "time"
   ): Promise<GeoTemporalDataset> {
-    // Try to find the time dimension if it's not the default "time"
-    let timeDimension = dimension;
-    if (!(timeDimension in this.dataset.coords)) {
-      // Try common time dimension names
-      const possibleTimeDimensions = ["time", "t", "date", "datetime"];
-      for (const candidate of possibleTimeDimensions) {
-        if (candidate in this.dataset.coords) {
-          timeDimension = candidate;
-          break;
-        }
-      }
+    const candidateKeys = Array.from(
+      new Set([dimension, ...DEFAULT_TIME_KEYS])
+    ).filter(Boolean) as string[];
+    const timeKey = this.inferCoordinateKey(candidateKeys);
+
+    if (!timeKey) {
+      throw new InvalidSelectionError(
+        `Coordinate "${dimension}" not found in dataset.`
+      );
     }
 
-    const coords = this.dataset.coords[timeDimension];
-    if (!coords || !Array.isArray(coords) || coords.length === 0) {
+    const coords = this.dataset.coords[timeKey];
+    if (!Array.isArray(coords) || coords.length === 0) {
       throw new InvalidSelectionError(
-        `Coordinate "${timeDimension}" not found in dataset.`
+        `Coordinate "${timeKey}" not found in dataset.`
       );
     }
 
@@ -160,12 +202,22 @@ export class GeoTemporalDataset {
       );
     }
 
-    const subset = await this.dataset.sel({
-      [timeDimension]: {
-        start: normalizedRange.start as any,
-        stop: normalizedRange.end as any,
-      },
-    }, { method: "nearest" });
+    let subset: Dataset;
+    try {
+      subset = await this.dataset.sel({
+        [timeKey]: {
+          start: normalizedRange.start as any,
+          stop: normalizedRange.end as any,
+        },
+      });
+    } catch (error) {
+      throw new InvalidSelectionError(
+        `Failed to apply time range on "${timeKey}": ${String(
+          (error as Error).message ?? error
+        )}`
+      );
+    }
+
     const wrapped = new GeoTemporalDataset(subset, this.metadata);
     wrapped.ensureHasData();
     return wrapped;
@@ -204,6 +256,7 @@ export class GeoTemporalDataset {
     }
     return selectionOptions;
   }
+
 
   /**
    * Select data at specific point coordinates

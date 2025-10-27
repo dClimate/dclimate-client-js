@@ -152,7 +152,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
       const variables = point.variables;
       if (variables.length > 0) {
-        const records = point.toRecords(variables[0]);
+        const records = await point.toRecords(variables[0]);
 
         expect(Array.isArray(records)).toBe(true);
         if (records.length > 0) {
@@ -173,7 +173,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
       const variables = timeSlice.variables;
       if (variables.length > 0) {
-        const records = timeSlice.toRecords(variables[0]);
+        const records = await timeSlice.toRecords(variables[0]);
 
         expect(Array.isArray(records)).toBe(true);
       }
@@ -195,7 +195,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
       const variables = selected.variables;
       if (variables.length > 0) {
-        const records = selected.toRecords(variables[0]);
+        const records = await selected.toRecords(variables[0]);
 
         expect(Array.isArray(records)).toBe(true);
       }
