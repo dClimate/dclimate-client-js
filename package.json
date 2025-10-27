@@ -1,17 +1,23 @@
 {
-  "name": "dclimate-client-js",
+  "name": "@dclimate/dclimate-client-js",
   "version": "0.1.0",
-  "description": "JavaScript client for dClimate datasets using jaxray and IPFS sharded stores",
+  "description": "JavaScript client for dClimate datasets using jaxray and IPFS stores",
   "type": "module",
+  "main": "./dist/node/index.js",
+  "module": "./dist/browser/index.js",
+  "types": "./dist/node/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/node/index.d.ts",
       "import": "./dist/browser/index.js",
-      "require": "./dist/node/index.js"
-    }
+      "default": "./dist/node/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser/index.d.ts",
+      "import": "./dist/browser/index.js"
+    },
+    "./package.json": "./package.json"
   },
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "files": [
     "dist",
     "README.md"
@@ -20,7 +26,10 @@
     "build:browser": "tsc -p tsconfig.browser.json",
     "build:node": "tsc -p tsconfig.node.json",
     "build": "npm run build:browser && npm run build:node",
-    "test": "vitest"
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "dclimate",
@@ -29,13 +38,24 @@
     "jaxray",
     "climate-data"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "TheGreatAlgo <37487508+TheGreatAlgo@users.noreply.github.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dClimate/dclimate-client-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/dClimate/dclimate-client-js/issues"
+  },
+  "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
     "@dclimate/jaxray": "^0.4.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
     "vitest": "^3.2.4"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
