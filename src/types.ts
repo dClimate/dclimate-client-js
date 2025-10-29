@@ -5,6 +5,7 @@ export interface ClientOptions {
 export interface LoadDatasetOptions {
   cid?: string;
   gatewayUrl?: string;
+  returnJaxrayDataset?: boolean;
 }
 
 export interface PointQueryOptions {

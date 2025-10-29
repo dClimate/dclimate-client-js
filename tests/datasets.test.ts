@@ -1,105 +1,87 @@
 import { describe, expect, it } from "vitest";
 import {
-  getDatasetEndpoint,
-  listDatasetKeys,
   HydrogenEndpoint,
-  DATASET_ENDPOINTS,
-  type DatasetKey,
+  listDatasetCatalog,
+  resolveDatasetSource,
 } from "../src/datasets.js";
+import { DatasetNotFoundError } from "../src/errors.js";
 
-describe("datasets", () => {
-  describe("getDatasetEndpoint", () => {
-    it("returns the correct endpoint for a valid dataset key", () => {
-      const endpoint = getDatasetEndpoint("fpar");
-      expect(endpoint).toBe(`${HydrogenEndpoint}/fpar`);
-    });
+describe("datasets catalog", () => {
+  it("groups datasets under their collections", () => {
+    const catalog = listDatasetCatalog();
 
-    it("returns the correct endpoint for aifs-single-precip", () => {
-      const endpoint = getDatasetEndpoint("aifs-single-precip");
-      expect(endpoint).toBe(`${HydrogenEndpoint}/aifs-single-precip`);
-    });
+    expect(catalog).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ collection: "aifs" }),
+        expect.objectContaining({ collection: "ifs" }),
+        expect.objectContaining({ collection: "era5" }),
+      ])
+    );
 
-    it("returns the correct endpoint for ifs-temperature", () => {
-      const endpoint = getDatasetEndpoint("ifs-temperature");
-      expect(endpoint).toBe(`${HydrogenEndpoint}/ifs-temperature`);
-    });
-
-    it("returns the correct endpoint for all dataset keys", () => {
-      const keys: DatasetKey[] = [
-        "fpar",
-        "aifs-single-precip",
-        "aifs-single-temperature",
-        "aifs-single-wind-u",
-        "aifs-single-wind-v",
-        "aifs-single-solar-radiation",
-        "aifs-ensemble-precip",
-        "aifs-ensemble-temperature",
-        "aifs-ensemble-wind-u",
-        "aifs-ensemble-wind-v",
-        "aifs-ensemble-solar-radiation",
-        "ifs-precip",
-        "ifs-temperature",
-        "ifs-wind-u",
-        "ifs-wind-v",
-        "ifs-soil-moisture-l3",
-        "ifs-solar-radiation",
-      ];
-
-      keys.forEach((key) => {
-        const endpoint = getDatasetEndpoint(key);
-        expect(endpoint).toBe(`${HydrogenEndpoint}/${key}`);
-        expect(endpoint).toBe(DATASET_ENDPOINTS[key]);
-      });
-    });
+    const era5 = catalog.find((group) => group.collection === "era5");
+    const variants = era5?.datasets.find((d) => d.dataset === "2m_temperature")?.variants;
+    expect(variants?.map((v) => v.variant)).toEqual([
+      "finalized",
+      "non-finalized",
+    ]);
   });
 
-  describe("listDatasetKeys", () => {
-    it("returns an array of all dataset keys", () => {
-      const keys = listDatasetKeys();
-      expect(Array.isArray(keys)).toBe(true);
-      expect(keys.length).toBeGreaterThan(0);
+  it("returns a defensive copy", () => {
+    const catalog = listDatasetCatalog();
+    catalog[0]?.datasets[0]?.variants.push({ variant: "mutated" });
+
+    const fresh = listDatasetCatalog();
+    expect(fresh.some((group) =>
+      group.datasets.some((dataset) =>
+        dataset.variants.some((variant) => variant.variant === "mutated")
+      )
+    )).toBe(false);
+  });
+
+  it("resolves CID-backed variants without fetch", () => {
+    const resolved = resolveDatasetSource({
+      collection: "era5",
+      dataset: "2m_temperature",
+      variant: "finalized",
     });
 
-    it("returns all expected dataset keys", () => {
-      const keys = listDatasetKeys();
-      const expectedKeys: DatasetKey[] = [
-        "fpar",
-        "aifs-single-precip",
-        "aifs-single-temperature",
-        "aifs-single-wind-u",
-        "aifs-single-wind-v",
-        "aifs-single-solar-radiation",
-        "aifs-ensemble-precip",
-        "aifs-ensemble-temperature",
-        "aifs-ensemble-wind-u",
-        "aifs-ensemble-wind-v",
-        "aifs-ensemble-solar-radiation",
-        "ifs-precip",
-        "ifs-temperature",
-        "ifs-wind-u",
-        "ifs-wind-v",
-        "ifs-soil-moisture-l3",
-        "ifs-solar-radiation",
-      ];
+    expect(resolved.slug).toBe("era5-2m-temperature-finalized");
+    expect(resolved.source).toEqual(
+      expect.objectContaining({
+        type: "cid",
+        cid: "bafyr4iacuutc5bgmirkfyzn4igi2wys7e42kkn674hx3c4dv4wrgjp2k2u",
+      })
+    );
+  });
 
-      expect(keys).toEqual(expect.arrayContaining(expectedKeys));
-      expect(keys.length).toBe(expectedKeys.length);
+  it("resolves URL-backed variants to Hydrogen endpoints", () => {
+    const resolved = resolveDatasetSource({
+      collection: "aifs",
+      dataset: "precipitation",
+      variant: "single",
     });
 
-    it("returns keys that match DATASET_ENDPOINTS keys", () => {
-      const keys = listDatasetKeys();
-      const endpointKeys = Object.keys(DATASET_ENDPOINTS);
-      expect(keys.sort()).toEqual(endpointKeys.sort());
-    });
+    expect(resolved.source).toEqual(
+      expect.objectContaining({
+        type: "url",
+        url: `${HydrogenEndpoint}/aifs-single-precip`,
+      })
+    );
+  });
 
-    it("each key returned should have a corresponding endpoint", () => {
-      const keys = listDatasetKeys();
-      keys.forEach((key) => {
-        const endpoint = getDatasetEndpoint(key);
-        expect(endpoint).toBeDefined();
-        expect(typeof endpoint).toBe("string");
-        expect(endpoint).toContain(HydrogenEndpoint);
-      });
-    });
+  it("throws when a variant is required", () => {
+    expect(() =>
+      resolveDatasetSource({ collection: "era5", dataset: "10m_u_wind" })
+    ).toThrow('Dataset "10m_u_wind" requires a variant to be specified.');
+  });
+
+  it("throws when dataset is unknown", () => {
+    expect(() =>
+      resolveDatasetSource({
+        collection: "aifs",
+        dataset: "unknown",
+        variant: "single",
+      })
+    ).toThrow(DatasetNotFoundError);
   });
 });

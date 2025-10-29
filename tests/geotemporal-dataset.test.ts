@@ -1,13 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { DClimateClient } from "../src/index.js";
+import { DClimateClient, GeoTemporalDataset } from "../src/index.js";
 import { InvalidSelectionError, NoDataFoundError } from "../src/errors.js";
 
 describe("GeoTemporalDataset - Real Data Integration Tests", () => {
-  const client = new DClimateClient();
+const client = new DClimateClient();
+
+const DATASET_REQUESTS: Record<string, any> = {
+  fpar: { collection: "copernicus", dataset: "fpar" },
+  "ifs-temperature": { collection: "ifs", dataset: "temperature" },
+  "ifs-precip": { collection: "ifs", dataset: "precipitation" },
+  "aifs-single-temperature": {
+    collection: "aifs",
+    dataset: "temperature",
+    variant: "single",
+  },
+  "aifs-ensemble-temperature": {
+    collection: "aifs",
+    dataset: "temperature",
+    variant: "ensemble",
+  },
+  "aifs-single-precip": {
+    collection: "aifs",
+    dataset: "precipitation",
+    variant: "single",
+  },
+};
+
+function loadDataset(key: keyof typeof DATASET_REQUESTS) {
+  const request = DATASET_REQUESTS[key];
+  if (!request) {
+    throw new Error(`Unknown dataset key: ${key}`);
+  }
+  return client.loadDataset({ request });
+}
 
   describe("loading and accessing real dataset", () => {
     it("loads a real dataset and accesses metadata", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       expect(dataset.info.dataset).toBe("fpar");
       expect(dataset.info.cid).toBeDefined();
@@ -16,7 +45,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("provides access to variables", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
       const variables = dataset.variables;
 
       expect(Array.isArray(variables)).toBe(true);
@@ -24,7 +53,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("provides access to coordinates", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar");
       const coords = dataset.coords;
 
       expect(coords).toBeDefined();
@@ -32,7 +61,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("reports not empty for real dataset", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       expect(dataset.isEmpty()).toBe(false);
     });
@@ -40,7 +69,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
   describe("point selection on real data", () => {
     it("selects a point from real dataset", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       // New York City coordinates
       const point = await dataset.point(40.7128, -74.006);
@@ -50,7 +79,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("selects different geographic points", async () => {
-      const dataset = await client.loadDataset({ dataset: "ifs-temperature" });
+      const dataset = await loadDataset("ifs-temperature") as GeoTemporalDataset;
 
       // London coordinates
       const londonPoint = await dataset.point(51.5074, -0.1278);
@@ -63,7 +92,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("uses nearest method by default", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       // Use coordinates that might not exactly match grid
       const point = await dataset.point(40.5, -73.5, {
@@ -76,7 +105,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
   describe("time range selection on real data", () => {
     it("selects a time range from real dataset", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       const timeSlice = await dataset.timeRange({
         start: "2024-01-01T00:00:00Z",
@@ -87,7 +116,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("accepts Date objects for time range", async () => {
-      const dataset = await client.loadDataset({ dataset: "ifs-precip" });
+      const dataset = await loadDataset("ifs-precip") as GeoTemporalDataset;
 
       const timeSlice = await dataset.timeRange({
         start: new Date("2024-01-01"),
@@ -100,7 +129,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
   describe("combined selections on real data", () => {
     it("combines point and time range selections", async () => {
-      const dataset = await client.loadDataset({ dataset: "aifs-single-temperature" });
+      const dataset = await loadDataset("aifs-single-temperature") as GeoTemporalDataset;
 
       const selected = await dataset.select({
         point: {
@@ -117,7 +146,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("chains point then time range", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       const result = await dataset
         .point(34.0522, -118.2437) // Los Angeles
@@ -132,7 +161,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("chains time range then point", async () => {
-      const dataset = await client.loadDataset({ dataset: "ifs-temperature" });
+      const dataset = await loadDataset("ifs-temperature") as GeoTemporalDataset;
 
       const result = await dataset
         .timeRange({
@@ -147,8 +176,8 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
   describe("converting to records with real data", () => {
     it("converts point selection to records", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
-      const point = await dataset.point(40.7128, -74.006);
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const point = await dataset.point(40.7128, -74.006) as GeoTemporalDataset;
 
       const variables = point.variables;
       if (variables.length > 0) {
@@ -165,7 +194,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("converts time range selection to records", async () => {
-      const dataset = await client.loadDataset({ dataset: "ifs-precip" });
+      const dataset = await loadDataset("ifs-precip") as GeoTemporalDataset;
       const timeSlice = await dataset.timeRange({
         start: "2024-01-01T00:00:00Z",
         end: "2024-01-03T00:00:00Z",
@@ -180,7 +209,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("converts combined selection to records", async () => {
-      const dataset = await client.loadDataset({ dataset: "aifs-ensemble-temperature" });
+      const dataset = await loadDataset("aifs-ensemble-temperature") as GeoTemporalDataset;
 
       const selected = await dataset.select({
         point: {
@@ -204,7 +233,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
   describe("metadata preservation through selections", () => {
     it("preserves metadata through point selection", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
       const originalCid = dataset.info.cid;
 
       const point = await dataset.point(40.7128, -74.006);
@@ -214,7 +243,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("preserves metadata through time range selection", async () => {
-      const dataset = await client.loadDataset({ dataset: "ifs-temperature" });
+      const dataset = await loadDataset("ifs-temperature") as GeoTemporalDataset;
       const originalCid = dataset.info.cid;
 
       const timeSlice = await dataset.timeRange({
@@ -223,11 +252,12 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
       });
 
       expect(timeSlice.info.cid).toBe(originalCid);
-      expect(timeSlice.info.dataset).toBe("ifs-temperature");
+      expect(timeSlice.info.dataset).toBe("temperature");
+      expect(timeSlice.info.collection).toBe("ifs");
     });
 
     it("preserves metadata through chained selections", async () => {
-      const dataset = await client.loadDataset({ dataset: "aifs-single-precip" });
+      const dataset = await loadDataset("aifs-single-precip") as GeoTemporalDataset;
       const originalCid = dataset.info.cid;
 
       const result = await dataset
@@ -240,13 +270,14 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
         );
 
       expect(result.info.cid).toBe(originalCid);
-      expect(result.info.dataset).toBe("aifs-single-precip");
+      expect(result.info.dataset).toBe("precip");
+      expect(result.info.variant).toBe("single");
     });
   });
 
   describe("testing multiple dataset types", () => {
     it("works with AIFS single datasets", async () => {
-      const dataset = await client.loadDataset({ dataset: "aifs-single-precip" });
+      const dataset = await loadDataset("aifs-single-precip") as GeoTemporalDataset;
       const point = await dataset.point(40.7128, -74.006);
 
       expect(point.isEmpty()).toBe(false);
@@ -256,7 +287,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 
   describe("error handling with real data", () => {
     it("throws NoDataFoundError when selection results in no data", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       // Use a time range far in the future that likely has no data
       await expect(
@@ -268,7 +299,7 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
     });
 
     it("throws InvalidSelectionError for invalid dimension", async () => {
-      const dataset = await client.loadDataset({ dataset: "fpar" });
+      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
 
       await expect(
         dataset.timeRange(

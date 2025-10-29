@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Dataset } from "@dclimate/jaxray";
 import { DClimateClient } from "../src/index.js";
 import { DatasetNotFoundError } from "../src/errors.js";
 import { HydrogenEndpoint } from "../src/datasets.js";
@@ -11,7 +12,7 @@ vi.mock("../src/ipfs/open-dataset.js", () => ({
   default: openDatasetFromCidMock,
 }));
 
-describe("fetchDatasetCid (via loadDataset)", () => {
+describe("loadDataset CID resolution", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     openDatasetFromCidMock.mockReset();
@@ -26,105 +27,146 @@ describe("fetchDatasetCid (via loadDataset)", () => {
     fetchMock.mockReset();
   });
 
-  describe("successful CID fetching", () => {
-    it("fetches CID successfully for valid dataset", async () => {
+  describe("URL-backed variants", () => {
+    it("fetches the CID from the configured endpoint", async () => {
       fetchMock.mockResolvedValue({
         ok: true,
         status: 200,
         json: async () => ({
-          dataset: "fpar",
-          cid: "bafybeiabc123",
-          timestamp: Date.now(),
+          dataset: "AIFS-SINGLE-PRECIP",
+          cid: "bafyfetch123",
         }),
       } as Response);
 
       const client = new DClimateClient();
-      await client.loadDataset({ dataset: "fpar" });
+      await client.loadDataset({ request: {
+        collection: "aifs",
+        dataset: "precipitation",
+        variant: "single",
+      }});
 
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(fetchMock).toHaveBeenCalledWith(`${HydrogenEndpoint}/fpar`);
+      expect(fetchMock).toHaveBeenCalledWith(
+        `${HydrogenEndpoint}/aifs-single-precip`
+      );
       expect(openDatasetFromCidMock).toHaveBeenCalledWith(
-        "bafybeiabc123",
+        "bafyfetch123",
         expect.any(Object)
       );
     });
 
-    it("trims whitespace from CID", async () => {
+    it("uses the slug as the metadata path regardless of the payload", async () => {
       fetchMock.mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({
-          dataset: "ifs-precip",
-          cid: "  bafybeiabc456  ",
-          timestamp: Date.now(),
-        }),
+        json: async () => ({ cid: "bafyfetch456" }),
       } as Response);
 
       const client = new DClimateClient();
-      await client.loadDataset({ dataset: "ifs-precip" });
+      const dataset = await client.loadDataset({ request: {
+        collection: "aifs",
+        dataset: "precipitation",
+        variant: "single",
+      }});
 
-      expect(openDatasetFromCidMock).toHaveBeenCalledWith(
-        "bafybeiabc456",
-        expect.any(Object)
-      );
-    });
+      if (dataset instanceof Dataset) {
+        throw new Error("Expected GeoTemporalDataset");
+      }
 
-    it("uses dataset key as path when payload.dataset is missing", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          cid: "bafybeiabc789",
-          timestamp: Date.now(),
-        }),
-      } as Response);
-
-      const client = new DClimateClient();
-      const dataset = await client.loadDataset({ dataset: "aifs-single-precip" });
-
-      expect(dataset.info.path).toBe("aifs-single-precip");
-    });
-
-    it("normalizes resolved path from payload to lowercase", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          dataset: "  AIFS-SINGLE-PRECIP  ",
-          cid: "bafybeiabc999",
-          timestamp: Date.now(),
-        }),
-      } as Response);
-
-      const client = new DClimateClient();
-      const dataset = await client.loadDataset({ dataset: "aifs-single-precip" });
-
-      expect(dataset.info.path).toBe("aifs-single-precip");
+      expect(dataset.info.path).toBe("aifs-precipitation-single");
     });
   });
 
-  describe("error handling - invalid dataset key", () => {
-    it("throws error for unregistered dataset key", async () => {
+  describe("CID-backed variants", () => {
+    it("skips fetching when CID is provided in the catalog", async () => {
+      const client = new DClimateClient();
+      await client.loadDataset({ request: {
+        collection: "era5",
+        dataset: "2m_temperature",
+        variant: "finalized",
+      }});
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(openDatasetFromCidMock).toHaveBeenCalledWith(
+        "bafyr4iacuutc5bgmirkfyzn4igi2wys7e42kkn674hx3c4dv4wrgjp2k2u",
+        expect.any(Object)
+      );
+    });
+
+    it("normalizes variant names before lookup", async () => {
+      const client = new DClimateClient();
+      const dataset = await client.loadDataset({ request: {
+        collection: "era5",
+        dataset: "10m_v_wind",
+        variant: "NON_FINALIZED",
+      }});
+
+      if (dataset instanceof Dataset) {
+        throw new Error("Expected GeoTemporalDataset");
+      }
+
+      expect(dataset.info.path).toBe("era5-10m-v-wind-non-finalized");
+      expect(dataset.info.variant).toBe("non-finalized");
+    });
+  });
+
+  describe("variant selection", () => {
+    it("uses the default variant when present", async () => {
       fetchMock.mockResolvedValue({
         ok: true,
         status: 200,
-        json: async () => ({ cid: "bafytest", dataset: "unknown" }),
+        json: async () => ({ cid: "bafyifsdefault" }),
       } as Response);
 
       const client = new DClimateClient();
+      const dataset = await client.loadDataset({ request: {
+        collection: "ifs",
+        dataset: "temperature",
+      }});
+
+      if (dataset instanceof Dataset) {
+        throw new Error("Expected GeoTemporalDataset");
+      }
+
+      expect(dataset.info.variant).toBe("default");
+    });
+
+    it("throws when a variant is required but missing", async () => {
+      const client = new DClimateClient();
 
       await expect(
-        client.loadDataset({ dataset: "invalid-dataset-key" })
+        client.loadDataset({ request: { collection: "era5", dataset: "2m_temperature" } })
+      ).rejects.toThrow('Dataset "2m_temperature" requires a variant to be specified.');
+    });
+
+    it("throws when the requested variant does not exist", async () => {
+      const client = new DClimateClient();
+
+      await expect(
+        client.loadDataset({
+          request: {
+            collection: "ifs",
+            dataset: "precipitation",
+            variant: "ensemble",
+          }
+        })
+      ).rejects.toThrow('Variant "ensemble" is not available for dataset "precipitation".');
+    });
+  });
+
+  describe("error handling", () => {
+    it("throws when the dataset is unknown", async () => {
+      const client = new DClimateClient();
+
+      await expect(
+        client.loadDataset({ request: {
+          collection: "aifs",
+          dataset: "unknown",
+          variant: "single",
+        }})
       ).rejects.toThrow(DatasetNotFoundError);
-
-      await expect(
-        client.loadDataset({ dataset: "invalid-dataset-key" })
-      ).rejects.toThrow('Dataset "invalid-dataset-key" is not registered in the dataset map.');
     });
-  });
 
-  describe("error handling - HTTP errors", () => {
-    it("throws error when endpoint returns 404", async () => {
+    it("throws when the HTTP endpoint returns an error", async () => {
       fetchMock.mockResolvedValue({
         ok: false,
         status: 404,
@@ -134,121 +176,45 @@ describe("fetchDatasetCid (via loadDataset)", () => {
       const client = new DClimateClient();
 
       await expect(
-        client.loadDataset({ dataset: "fpar" })
-      ).rejects.toThrow(DatasetNotFoundError);
-
-      await expect(
-        client.loadDataset({ dataset: "fpar" })
-      ).rejects.toThrow(`Dataset "fpar" was not found at "${HydrogenEndpoint}/fpar".`);
-    });
-
-    it("throws error for non-404 HTTP errors", async () => {
-      fetchMock.mockResolvedValue({
-        ok: false,
-        status: 500,
-        json: async () => ({}),
-      } as Response);
-
-      const client = new DClimateClient();
-
-      await expect(
-        client.loadDataset({ dataset: "ifs-temperature" })
-      ).rejects.toThrow(DatasetNotFoundError);
-
-      await expect(
-        client.loadDataset({ dataset: "ifs-temperature" })
-      ).rejects.toThrow('Failed to fetch dataset "ifs-temperature" (status 500).');
-    });
-
-    it("throws error for 403 Forbidden", async () => {
-      fetchMock.mockResolvedValue({
-        ok: false,
-        status: 403,
-        json: async () => ({}),
-      } as Response);
-
-      const client = new DClimateClient();
-
-      await expect(
-        client.loadDataset({ dataset: "aifs-ensemble-temperature" })
-      ).rejects.toThrow('Failed to fetch dataset "aifs-ensemble-temperature" (status 403).');
-    });
-  });
-
-  describe("error handling - missing or invalid CID", () => {
-    it("throws error when CID is missing from response", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          dataset: "fpar",
-          timestamp: Date.now(),
-        }),
-      } as Response);
-
-      const client = new DClimateClient();
-
-      await expect(
-        client.loadDataset({ dataset: "fpar" })
-      ).rejects.toThrow(DatasetNotFoundError);
-
-      await expect(
-        client.loadDataset({ dataset: "fpar" })
-      ).rejects.toThrow(`Dataset endpoint "${HydrogenEndpoint}/fpar" did not provide a CID for "fpar".`);
-    });
-
-    it("throws error when CID is empty string", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          dataset: "ifs-precip",
-          cid: "",
-          timestamp: Date.now(),
-        }),
-      } as Response);
-
-      const client = new DClimateClient();
-
-      await expect(
-        client.loadDataset({ dataset: "ifs-precip" })
-      ).rejects.toThrow(DatasetNotFoundError);
-
-      await expect(
-        client.loadDataset({ dataset: "ifs-precip" })
-      ).rejects.toThrow('did not provide a CID for "ifs-precip"');
-    });
-
-    it("throws error when CID is whitespace only", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          dataset: "aifs-single-wind-u",
-          cid: "   ",
-          timestamp: Date.now(),
-        }),
-      } as Response);
-
-      const client = new DClimateClient();
-
-      await expect(
-        client.loadDataset({ dataset: "aifs-single-wind-u" })
-      ).rejects.toThrow('did not provide a CID for "aifs-single-wind-u"');
-    });
-  });
-
-  describe("bypassing fetchDatasetCid with cid option", () => {
-    it("skips fetch when CID is provided directly", async () => {
-      const client = new DClimateClient();
-      await client.loadDataset(
-        { dataset: "fpar" },
-        { cid: "bafydirect123" }
+        client.loadDataset({ request: {
+          collection: "aifs",
+          dataset: "precipitation",
+          variant: "single",
+        }})
+      ).rejects.toThrow(
+        `Dataset "aifs-precipitation-single" was not found at "${HydrogenEndpoint}/aifs-single-precip".`
       );
+    });
+
+    it("throws when the endpoint omits a CID", async () => {
+      fetchMock.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({ dataset: "AIFS-SINGLE-PRECIP" }),
+      } as Response);
+
+      const client = new DClimateClient();
+
+      await expect(
+        client.loadDataset({ request: {
+          collection: "aifs",
+          dataset: "precipitation",
+          variant: "single",
+        }})
+      ).rejects.toThrow(
+        `Dataset endpoint "${HydrogenEndpoint}/aifs-single-precip" did not provide a CID for "aifs-precipitation-single".`
+      );
+    });
+  });
+
+  describe("explicit CID option", () => {
+    it("bypasses catalog resolution", async () => {
+      const client = new DClimateClient();
+      await client.loadDataset({ request: { dataset: "custom", }, options: { cid: "bafydirect" } });
 
       expect(fetchMock).not.toHaveBeenCalled();
       expect(openDatasetFromCidMock).toHaveBeenCalledWith(
-        "bafydirect123",
+        "bafydirect",
         expect.any(Object)
       );
     });

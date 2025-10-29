@@ -1,6 +1,6 @@
 {
   "name": "@dclimate/dclimate-client-js",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "JavaScript client for dClimate datasets using jaxray and IPFS stores",
   "type": "module",
   "main": "./dist/node/index.js",

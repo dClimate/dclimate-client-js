@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DClimateClient } from "../src/index.js";
+import { DClimateClient, GeoTemporalDataset } from "../src/index.js";
 import {
   DEFAULT_IPFS_GATEWAY,
 } from "../src/constants.js";
@@ -40,8 +40,12 @@ describe("DClimateClient usage", () => {
   it("loads a dataset and supports point + time selection workflow", async () => {
     const client = new DClimateClient();
 
-    const datasetName = "aifs-ensemble-temperature";
-    const dataset = await client.loadDataset({ dataset: datasetName });
+    const request = {
+      collection: "aifs",
+      dataset: "temperature",
+      variant: "ensemble",
+    } as const;
+    const dataset = await client.loadDataset({ request }) as GeoTemporalDataset;
     const point = await dataset.point(40.75, -73.99);
     const slice = await point.timeRange({
       start: "2023-01-01T00:00:00Z",
@@ -51,7 +55,7 @@ describe("DClimateClient usage", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
-      `${HydrogenEndpoint}/${datasetName}`
+      `${HydrogenEndpoint}/aifs-ensemble-temperature`
     );
 
     expect(openDatasetFromCidMock).toHaveBeenCalledTimes(1);
@@ -69,6 +73,7 @@ describe("DClimateClient usage", () => {
       longitude: -73.99,
       time: "2023-01-01T00:00:00.000Z",
     });
-    expect(slice.info.path).toBe(datasetName);
+    expect(slice.info.path).toBe("aifs-temperature-ensemble");
+    expect(slice.info.variant).toBe("ensemble");
   });
 });

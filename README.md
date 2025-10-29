@@ -56,9 +56,28 @@ const subset = await client.selectDataset(
 );
 ```
 
+### Discovering available datasets
+
+```typescript
+const catalog = client.listAvailableDatasets();
+
+catalog.forEach(({ collection, datasets }) => {
+  console.log(collection ?? "(no collection)");
+  datasets.forEach(({ dataset, variants, request, slug }) => {
+    if (variants.length === 0 && request) {
+      console.log(`  ${dataset} ->`, { request, slug });
+    } else {
+      variants.forEach(({ variant, request: variantRequest, slug: variantSlug }) => {
+        console.log(`  ${dataset} (${variant}) ->`, { request: variantRequest, slug: variantSlug });
+      });
+    }
+  });
+});
+```
+
 ## Configuration
 
-- **Dataset map** – only datasets listed in the built-in map are supported. Use `listAvailableDatasets()` to inspect the keys.
+- **Dataset catalog** – includes both HTTP-backed dataset keys and CID lookup entries (collection/variant combinations). Use `listAvailableDatasets()` to inspect everything the client can resolve.
 - **Gateway** – set `gatewayUrl` on the client or per call inside `loadDataset`.
 - **Direct CID access** – supply `cid` in `LoadDatasetOptions` to skip catalog resolution entirely.
 
