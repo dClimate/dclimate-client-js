@@ -8,6 +8,18 @@ export interface DatasetVariantConfig {
   variant: string;
   cid?: string;
   url?: string;
+  /**
+   * Priority for auto-concatenation. Lower numbers = higher priority (loaded first).
+   * When multiple variants have concatPriority defined, they will be automatically
+   * concatenated in priority order (1, 2, 3, ...).
+   * Variants without concatPriority are not included in auto-concatenation.
+   */
+  concatPriority?: number;
+  /**
+   * Dimension along which to concatenate (default: "time").
+   * Only used when concatPriority is defined.
+   */
+  concatDimension?: string;
 }
 
 export interface CatalogDataset {
@@ -115,10 +127,14 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
           {
             variant: "finalized",
             cid: "bafyr4iacuutc5bgmirkfyzn4igi2wys7e42kkn674hx3c4dv4wrgjp2k2u",
+            concatPriority: 1,
+            concatDimension: "time",
           },
           {
             variant: "non-finalized",
             cid: "bafyr4ihicmzx4uw4pefk7idba3mz5r5g27au3l7d62yj4gguxx6neaa5ti",
+            concatPriority: 2,
+            concatDimension: "time",
           },
         ],
       },
@@ -128,10 +144,14 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
           {
             variant: "finalized",
             cid: "bafyr4icium3zr6dyewfzkcwpnsb77nmxeblaomdk3kz3f2wz2rqq3i2yfi",
+            concatPriority: 1,
+            concatDimension: "time",
           },
           {
             variant: "non-finalized",
             cid: "bafyr4ifh3khz7f2mj6subudsbri7wfbna7s2iw5inn2wvbhkgms7k6n6ly",
+            concatPriority: 2,
+            concatDimension: "time",
           },
         ],
       },
@@ -141,10 +161,14 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
           {
             variant: "finalized",
             cid: "bafyr4ih6kgfr2pgucs6cgxbyboayqrejv7wbsbcv23ldr7zqbtfhdhniwa",
+            concatPriority: 1,
+            concatDimension: "time",
           },
           {
             variant: "non-finalized",
             cid: "bafyr4ihaevzkwj6ozhbwcpg6h3cacfa2voa4ezhsdlcfnshu7wccutup24",
+            concatPriority: 2,
+            concatDimension: "time",
           },
         ],
       },
@@ -154,10 +178,14 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
           {
             variant: "finalized",
             cid: "bafyr4igqxykzgn7ueyuxnyupb42bgav3o2v6ikarwyhlxisknypeyfjz5q",
+            concatPriority: 1,
+            concatDimension: "time",
           },
           {
             variant: "non-finalized",
             cid: "bafyr4ih5y3nkxdycxjzqhapynjdzbuj56fo4n3apdlcvqhgnggojk22ca4",
+            concatPriority: 2,
+            concatDimension: "time",
           },
         ],
       },
@@ -167,10 +195,14 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
           {
             variant: "finalized",
             cid: "bafyr4ico6t4t2ztxbniigqmiy2rfbmhxpoge56oae3afqwxwwdw3ou4qya",
+            concatPriority: 1,
+            concatDimension: "time",
           },
           {
             variant: "non-finalized",
             cid: "bafyr4iaqdlk2ircn72rlaigrb6hufgavcxsqrjvoywokgz25ctel3btqzu",
+            concatPriority: 2,
+            concatDimension: "time",
           },
         ],
       },
@@ -381,6 +413,32 @@ function normalizeKey(value: string | undefined): string {
         .replace(/[-\s]+/g, "_")
         .replace(/__+/g, "_")
     : "";
+}
+
+/**
+ * Get all variants for a dataset that have concatPriority defined,
+ * sorted by priority (ascending)
+ *
+ * @param request - Dataset request (collection and dataset name)
+ * @returns Array of variant configs with concatPriority, sorted by priority
+ */
+export function getConcatenableVariants(
+  request: Omit<DatasetRequest, "variant">
+): DatasetVariantConfig[] {
+  const datasetKey = normalizeKey(request.dataset);
+  if (!datasetKey) {
+    return [];
+  }
+
+  const collectionEntry = findCollection(request.collection, datasetKey);
+  const datasetEntry = findDataset(collectionEntry, datasetKey);
+
+  // Filter variants that have concatPriority and sort by priority
+  const concatVariants = datasetEntry.variants
+    .filter((v) => v.concatPriority !== undefined)
+    .sort((a, b) => (a.concatPriority ?? 0) - (b.concatPriority ?? 0));
+
+  return concatVariants;
 }
 
 export { DATASET_CATALOG_INTERNAL as DATASET_CATALOG };

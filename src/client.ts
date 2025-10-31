@@ -14,8 +14,11 @@ import { normalizeSegment } from "./utils.js";
 import {
   listDatasetCatalog,
   resolveDatasetSource,
+  getConcatenableVariants,
   type DatasetCatalog,
+  DatasetVariantConfig,
 } from "./datasets.js";
+import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
 
 interface DatasetApiResponse {
   dataset?: string;
@@ -44,6 +47,7 @@ export class DClimateClient {
     request,
     options = {
       returnJaxrayDataset: false,
+      autoConcatenate: false,
     },
   }: {
     request: DatasetRequest;
@@ -51,11 +55,33 @@ export class DClimateClient {
   }): Promise<GeoTemporalDataset | Dataset> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const normalizedDatasetKey = normalizeSegment(request.dataset);
+    const autoConcatenate = options.autoConcatenate;
 
     if (!normalizedDatasetKey) {
       throw new DatasetNotFoundError("Dataset name must be provided.");
     }
 
+    // Check if auto-concatenation should be applied
+    const shouldConcat = autoConcatenate || !request.variant;
+
+    if (shouldConcat) {
+      // Try to get concatenable variants
+      const concatVariants = getConcatenableVariants({
+        dataset: request.dataset,
+        collection: request.collection,
+      });
+
+      if (concatVariants.length > 1) {
+        // Load and concatenate multiple variants
+        return this.loadAndConcatenateVariants(
+          request,
+          concatVariants,
+          options
+        );
+      }
+    }
+
+    // Fall back to single variant loading
     let cid: string;
     let resolvedPath: string;
     let metadataDataset = request.dataset;
@@ -120,6 +146,65 @@ export class DClimateClient {
       return dataset;
     }
     return dataset.select(selection);
+  }
+
+  private async loadAndConcatenateVariants(
+    request: DatasetRequest,
+    concatVariants: DatasetVariantConfig[],
+    options: LoadDatasetOptions
+  ): Promise<GeoTemporalDataset | Dataset> {
+    const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
+
+    // Load all variants in parallel
+    const variantsToLoad: VariantToLoad[] = await Promise.all(
+      concatVariants.map(async (variantConfig) => {
+        // Resolve the variant to get CID
+        const resolved = resolveDatasetSource({
+          ...request,
+          variant: variantConfig.variant,
+        });
+
+        let cid: string;
+        if (resolved.source.type === "cid") {
+          cid = resolved.source.cid;
+        } else {
+          cid = await this.fetchDatasetCidFromEndpoint(
+            resolved.slug,
+            resolved.source.url
+          );
+        }
+
+        // Load the dataset
+        const dataset = await openDatasetFromCid(cid, {
+          gatewayUrl,
+          ipfsElements: this.getIpfsElements(gatewayUrl),
+        });
+
+        return {
+          variant: variantConfig,
+          dataset,
+        };
+      })
+    );
+
+    // Concatenate the variants
+    const concatenatedDataset = await concatenateVariants(variantsToLoad);
+
+    if (options.returnJaxrayDataset) {
+      return concatenatedDataset;
+    }
+
+    // Build metadata for the concatenated dataset
+    const metadata: DatasetMetadata = {
+      dataset: request.dataset,
+      collection: request.collection,
+      concatenatedVariants: concatVariants.map((v) => v.variant),
+      path: `${request.collection ?? ""}/${request.dataset}`,
+      cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
+      fetchedAt: new Date(),
+    };
+
+    return new GeoTemporalDataset(concatenatedDataset, metadata);
   }
 
   private async fetchDatasetCidFromEndpoint(

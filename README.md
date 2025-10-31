@@ -7,6 +7,7 @@ The goal is to mirror the functionality of the Python `dclimate-zarr-client` pac
 ## Features
 
 - **Dataset loader** with curated catalog that resolves datasets from HTTP endpoints or direct CIDs
+- **Smart variant concatenation** – automatically merges finalized and non-finalized data for complete time series
 - **IPFS integration** powered by `@dclimate/jaxray` for efficient Zarr store access
 - **GeoTemporalDataset** wrapper with rich selection capabilities:
   - Single point selection with nearest-neighbor matching
@@ -61,6 +62,49 @@ const slice = await point.timeRange({
 });
 
 console.log(await slice.toRecords("precipitation"));
+```
+
+### Automatic variant concatenation
+
+For datasets with multiple variants (e.g., ERA5 with "finalized" and "non-finalized" data), the client automatically merges them into a complete time series when no specific variant is requested:
+
+```typescript
+// Automatically loads and concatenates finalized + non-finalized variants
+const dataset = await client.loadDataset({
+  request: {
+    collection: "era5",
+    dataset: "2m_temperature"
+    // No variant specified - triggers auto-concatenation if possible
+  }
+});
+
+// Returns a dataset with:
+// - Finalized data (high-quality, historical)
+// - Non-finalized data (recent, after finalized ends)
+// - No duplicate timestamps
+
+console.log(dataset.info.concatenatedVariants);
+// Output: ["finalized", "non-finalized"]
+```
+
+The concatenation:
+- **Prioritizes finalized data** – Higher quality historical data comes first
+- **Avoids duplicates** – Non-finalized data is automatically sliced to start after the last finalized timestamp
+- **Works with any variants** – Supports finalized/non-finalized, analysis/reanalysis, or any custom variant combinations
+- **Configurable** – Controlled by `concatPriority` in the dataset catalog
+
+To load a specific variant without concatenation:
+
+```typescript
+// Load only finalized data
+const finalized = await client.loadDataset({
+  request: {
+    collection: "era5",
+    dataset: "2m_temperature",
+    variant: "finalized"  // Specific variant - no concatenation
+  }
+});
+
 ```
 
 ### Selecting while loading
@@ -171,7 +215,8 @@ const dataset = await client.loadDataset({
   options: {
     gatewayUrl: "https://custom-gateway.com",  // Optional: override client gateway
     cid: "bafyr4ia...",                         // Optional: load directly from CID
-    returnJaxrayDataset: false                  // Optional: return raw jaxray Dataset
+    returnJaxrayDataset: false,                 // Optional: return raw jaxray Dataset
+    autoConcatenate: true                       // Optional: auto-merge variants (default: false)
   }
 });
 ```

@@ -6,6 +6,7 @@ export interface LoadDatasetOptions {
   cid?: string;
   gatewayUrl?: string;
   returnJaxrayDataset?: boolean;
+  autoConcatenate?: boolean;
 }
 
 export interface PointQueryOptions {
@@ -33,6 +34,10 @@ export interface DatasetMetadata {
   dataset: string;
   collection?: string;
   variant?: string;
+  /**
+   * Array of variants that were concatenated together (if auto-concatenation was used)
+   */
+  concatenatedVariants?: string[];
   path: string;
   cid: string;
   fetchedAt: Date;
