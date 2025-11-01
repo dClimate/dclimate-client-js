@@ -2,13 +2,14 @@
 # yarn lockfile v1
 
 
-"@dclimate/jaxray@^0.5.3":
-  version "0.5.3"
-  resolved "https://registry.yarnpkg.com/@dclimate/jaxray/-/jaxray-0.5.3.tgz#41dba509782b9e28aa051741e8441e1e52219ebd"
-  integrity sha512-zwVL+99U8hmWFTKTXvt133NJ949uh51fr9/7mcDJIV6xffymlZUaqew1ETJaWCmh9HtRMCIKnF5TWd2ZZxoRnA==
+"@dclimate/jaxray@^0.5.5":
+  version "0.5.5"
+  resolved "https://registry.yarnpkg.com/@dclimate/jaxray/-/jaxray-0.5.5.tgz#1591aa2f3be8a2051c6b2651bc294700441b9de3"
+  integrity sha512-dQVINBUnKpzMFldUGRMJqLET6IbpPRaw8n0jEzyliMOn5Xxs41CFX3/UVDSYPOKNRprBVYinYxCDeqzPqb3kWw==
   dependencies:
     "@ipld/dag-cbor" "^9.2.5"
     "@noble/hashes" "^2.0.1"
+    ipfs-unixfs "^12.0.0"
     it-all "^1.0.6"
     multiformats "^13.3.1"
     uint8arrays "^5.1.0"
@@ -466,6 +467,14 @@ fsevents@~2.3.2, fsevents@~2.3.3:
   resolved "https://registry.npmjs.org/fsevents/-/fsevents-2.3.3.tgz"
   integrity sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==
 
+ipfs-unixfs@^12.0.0:
+  version "12.0.0"
+  resolved "https://registry.yarnpkg.com/ipfs-unixfs/-/ipfs-unixfs-12.0.0.tgz#3b62c872fa8bd0fe820d7061a6edbff805053acf"
+  integrity sha512-6I2YSqYCxcr/u1xdWROQU+PkmG7NAMRpwNiFffU9lmSv1I4nCXRDRy6YFH7dg8v17+gM1w+ijBK31rZGrrF5Og==
+  dependencies:
+    protons-runtime "^5.5.0"
+    uint8arraylist "^2.4.8"
+
 it-all@^1.0.6:
   version "1.0.6"
   resolved "https://registry.npmjs.org/it-all/-/it-all-1.0.6.tgz"
@@ -538,6 +547,15 @@ postcss@^8.5.6:
     nanoid "^3.3.11"
     picocolors "^1.1.1"
     source-map-js "^1.2.1"
+
+protons-runtime@^5.5.0:
+  version "5.6.0"
+  resolved "https://registry.yarnpkg.com/protons-runtime/-/protons-runtime-5.6.0.tgz#df1ef57497d04529a23ee6020f1c24f1d15db141"
+  integrity sha512-/Kde+sB9DsMFrddJT/UZWe6XqvL7SL5dbag/DBCElFKhkwDj7XKt53S+mzLyaDP5OqS0wXjV5SA572uWDaT0Hg==
+  dependencies:
+    uint8-varint "^2.0.2"
+    uint8arraylist "^2.4.3"
+    uint8arrays "^5.0.1"
 
 reference-spec-reader@^0.2.0:
   version "0.2.0"
@@ -640,7 +658,22 @@ typescript@^5.4.0:
   resolved "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz"
   integrity sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==
 
-uint8arrays@^5.1.0:
+uint8-varint@^2.0.2:
+  version "2.0.4"
+  resolved "https://registry.yarnpkg.com/uint8-varint/-/uint8-varint-2.0.4.tgz#85be52b3849eb30f2c3640a2df8a14364180affb"
+  integrity sha512-FwpTa7ZGA/f/EssWAb5/YV6pHgVF1fViKdW8cWaEarjB8t7NyofSWBdOTyFPaGuUG4gx3v1O3PQ8etsiOs3lcw==
+  dependencies:
+    uint8arraylist "^2.0.0"
+    uint8arrays "^5.0.0"
+
+uint8arraylist@^2.0.0, uint8arraylist@^2.4.3, uint8arraylist@^2.4.8:
+  version "2.4.8"
+  resolved "https://registry.yarnpkg.com/uint8arraylist/-/uint8arraylist-2.4.8.tgz#5a4d17f4defd77799cb38e93fd5db0f0dceddc12"
+  integrity sha512-vc1PlGOzglLF0eae1M8mLRTBivsvrGsdmJ5RbK3e+QRvRLOZfZhQROTwH/OfyF3+ZVUg9/8hE8bmKP2CvP9quQ==
+  dependencies:
+    uint8arrays "^5.0.1"
+
+uint8arrays@^5.0.0, uint8arrays@^5.0.1, uint8arrays@^5.1.0:
   version "5.1.0"
   resolved "https://registry.npmjs.org/uint8arrays/-/uint8arrays-5.1.0.tgz"
   integrity sha512-vA6nFepEmlSKkMBnLBaUMVvAC4G3CTmO58C12y4sq6WPDOR7mOFYOi7GlrQ4djeSbP6JG9Pv9tJDM97PedRSww==
