@@ -119,6 +119,40 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
     ],
   },
   {
+    collection: "prism",
+    datasets: [
+      {
+        dataset: "precipitation-800m",
+        variants: [{ variant: "default", url: `${HydrogenEndpoint}/prism-precip-800m` }],
+      },
+      {
+        dataset: "tmax-800m",
+        variants: [{ variant: "default", url: `${HydrogenEndpoint}/prism-tmax-800m` }],
+      },
+    ],
+  },
+  {
+    collection: "gfs",
+    datasets: [
+      {
+        dataset: "precipitation-rate",
+        variants: [{ variant: "default", url: `${HydrogenEndpoint}/gfs-precipitation-rate` }],
+      },
+      {
+        dataset: "precipitation-total",
+        variants: [{ variant: "default", url: `${HydrogenEndpoint}/gfs-precipitation-total` }],
+      },
+      {
+        dataset: "temperature-max",
+        variants: [{ variant: "default", url: `${HydrogenEndpoint}/gfs-max-temperature` }],
+      },
+      {
+        dataset: "temperature-min",
+        variants: [{ variant: "default", url: `${HydrogenEndpoint}/gfs-min-temperature` }],
+      },
+    ],
+  },
+  {
     collection: "era5",
     datasets: [
       {
