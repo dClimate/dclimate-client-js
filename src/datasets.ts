@@ -73,6 +73,13 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
           { variant: "ensemble", url: `${HydrogenEndpoint}/aifs-ensemble-solar-radiation` },
         ],
       },
+      {
+        dataset: "dew_point",
+        variants: [
+          { variant: "single", url: `${HydrogenEndpoint}/aifs-single-dew-point` },
+          { variant: "ensemble", url: `${HydrogenEndpoint}/aifs-ensemble-dew-point` },
+        ],
+      }
     ],
   },
   {
@@ -115,6 +122,10 @@ const DATASET_CATALOG_INTERNAL: DatasetCatalog = [
       {
         dataset: "solar_radiation",
         variants: [{ variant: "default", url: `${HydrogenEndpoint}/ifs-solar-radiation` }],
+      },
+      {
+        dataset: "dew_point",
+        variants: [{ variant: "default", url: `${HydrogenEndpoint}/ifs-dew-point` }],
       },
     ],
   },
