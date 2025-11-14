@@ -62,7 +62,7 @@ describe("loadDataset CID resolution", () => {
       } as Response);
 
       const client = new DClimateClient();
-      const dataset = await client.loadDataset({ request: {
+      const [dataset] = await client.loadDataset({ request: {
         collection: "aifs",
         dataset: "precipitation",
         variant: "single",
@@ -94,7 +94,7 @@ describe("loadDataset CID resolution", () => {
 
     it("normalizes variant names before lookup", async () => {
       const client = new DClimateClient();
-      const dataset = await client.loadDataset({ request: {
+      const [dataset] = await client.loadDataset({ request: {
         collection: "era5",
         dataset: "10m_v_wind",
         variant: "NON_FINALIZED",
@@ -118,7 +118,7 @@ describe("loadDataset CID resolution", () => {
       } as Response);
 
       const client = new DClimateClient();
-      const dataset = await client.loadDataset({ request: {
+      const [dataset] = await client.loadDataset({ request: {
         collection: "ifs",
         dataset: "temperature",
       }});

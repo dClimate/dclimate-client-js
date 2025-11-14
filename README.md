@@ -46,13 +46,21 @@ import { DClimateClient } from "@dclimate/dclimate-client-js";
 const client = new DClimateClient();
 
 // Load a dataset by collection, dataset name, and variant.
-const dataset = await client.loadDataset({
+// Returns a tuple: [dataset, metadata]
+const [dataset, metadata] = await client.loadDataset({
   request: {
     collection: "aifs",
     dataset: "temperature",
     variant: "ensemble"
   }
 });
+
+// Check metadata about what was loaded
+console.log(`Loaded: ${metadata.path}`);
+console.log(`CID: ${metadata.cid}`);
+console.log(`Timestamp: ${metadata.timestamp}`); // Unix timestamp in milliseconds
+console.log(`Source: ${metadata.source}`); // 'catalog' or 'direct_cid'
+console.log(`URL: ${metadata.url}`); // URL if fetched from endpoint
 
 // Narrow to a single location (nearest neighbour) and time range.
 const point = await dataset.point(40.75, -73.99);
@@ -70,7 +78,7 @@ For datasets with multiple variants (e.g., ERA5 with "finalized" and "non-finali
 
 ```typescript
 // Automatically loads and concatenates finalized + non-finalized variants
-const dataset = await client.loadDataset({
+const [dataset, metadata] = await client.loadDataset({
   request: {
     collection: "era5",
     dataset: "2m_temperature"
@@ -83,6 +91,8 @@ const dataset = await client.loadDataset({
 // - Non-finalized data (recent, after finalized ends)
 // - No duplicate timestamps
 
+console.log(metadata.concatenatedVariants);
+// Output: ["finalized", "non-finalized"]
 console.log(dataset.info.concatenatedVariants);
 // Output: ["finalized", "non-finalized"]
 ```
@@ -97,7 +107,7 @@ To load a specific variant without concatenation:
 
 ```typescript
 // Load only finalized data
-const finalized = await client.loadDataset({
+const [finalized, metadata] = await client.loadDataset({
   request: {
     collection: "era5",
     dataset: "2m_temperature",

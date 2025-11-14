@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DClimateClient } from "../src/index.js";
-import type { GeoTemporalDataset } from "../src/index.js";
+import type { DatasetMetadata, GeoTemporalDataset } from "../src/index.js";
 import { Dataset } from "@dclimate/jaxray";
 
 describe("Dataset concatenation", () => {
@@ -8,7 +8,7 @@ describe("Dataset concatenation", () => {
     const client = new DClimateClient();
 
     // Load finalized variant only
-    const finalized = await client.loadDataset({
+    const [finalized] = await client.loadDataset({
       request: {
         collection: "era5",
         dataset: "2m_temperature",
@@ -17,10 +17,10 @@ describe("Dataset concatenation", () => {
       options: {
         returnJaxrayDataset: true,
       },
-    }) as Dataset;
+    }) as [Dataset, DatasetMetadata];
 
     // Load non-finalized variant only
-    const nonFinalized = await client.loadDataset({
+    const [nonFinalized] = await client.loadDataset({
       request: {
         collection: "era5",
         dataset: "2m_temperature",
@@ -29,10 +29,10 @@ describe("Dataset concatenation", () => {
       options: {
         returnJaxrayDataset: true,
       },
-    }) as Dataset;
+    }) as [Dataset, DatasetMetadata];
 
     // Load concatenated version (auto-concat by not specifying variant)
-    const concatenated = await client.loadDataset({
+    const [concatenated] = await client.loadDataset({
       request: {
         collection: "era5",
         dataset: "2m_temperature",
@@ -41,7 +41,7 @@ describe("Dataset concatenation", () => {
         autoConcatenate: true, // Explicit, but this is the default
         returnJaxrayDataset: true,
       },
-    }) as Dataset;
+    }) as [Dataset, DatasetMetadata];
 
     // 
 
@@ -119,13 +119,13 @@ describe("Dataset concatenation", () => {
   it("loading with specific variant does NOT concatenate", async () => {
     const client = new DClimateClient();
 
-    const finalizedOnly = await client.loadDataset({
+    const [finalizedOnly] = await client.loadDataset({
       request: {
         collection: "era5",
         dataset: "2m_temperature",
         variant: "finalized",
       },
-    }) as GeoTemporalDataset;
+    }) as [GeoTemporalDataset, DatasetMetadata];
 
     // Should NOT have concatenatedVariants in metadata
     expect(finalizedOnly.info.concatenatedVariants).toBeUndefined();

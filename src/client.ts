@@ -30,9 +30,11 @@ export class DClimateClient {
   private gatewayUrl: string;
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
+  private clientIpfsElements?: IpfsElements;
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
+    this.clientIpfsElements = options.ipfsElements;
   }
 
   listAvailableDatasets(): DatasetCatalog {
@@ -52,8 +54,9 @@ export class DClimateClient {
   }: {
     request: DatasetRequest;
     options?: LoadDatasetOptions;
-  }): Promise<GeoTemporalDataset | Dataset> {
+  }): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
+    const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
     const normalizedDatasetKey = normalizeSegment(request.dataset);
     const autoConcatenate = options.autoConcatenate;
 
@@ -61,10 +64,8 @@ export class DClimateClient {
       throw new DatasetNotFoundError("Dataset name must be provided.");
     }
 
-    // Check if auto-concatenation should be applied
-    const shouldConcat = autoConcatenate || !request.variant;
-
-    if (shouldConcat) {
+    // Skip auto-concatenation if explicit CID is provided
+    if (!options.cid && autoConcatenate) {
       // Try to get concatenable variants
       const concatVariants = getConcatenableVariants({
         dataset: request.dataset,
@@ -87,6 +88,8 @@ export class DClimateClient {
     let metadataDataset = request.dataset;
     let metadataCollection = request.collection;
     let metadataVariant = request.variant ?? "";
+    let urlFetchResult: DatasetApiResponse | undefined;
+    let sourceUrl: string | undefined;
 
     if (options.cid) {
       cid = options.cid;
@@ -102,32 +105,36 @@ export class DClimateClient {
       if (resolved.source.type === "cid") {
         cid = resolved.source.cid;
       } else {
-        cid = await this.fetchDatasetCidFromEndpoint(
+        sourceUrl = resolved.source.url;
+        urlFetchResult = await this.fetchDatasetCidFromEndpoint(
           resolved.slug,
           resolved.source.url
         );
+        cid = urlFetchResult.cid!.trim();
       }
     }
-
     const dataset = await openDatasetFromCid(cid, {
       gatewayUrl,
-      ipfsElements: this.getIpfsElements(gatewayUrl),
+      ipfsElements,
     });
-
-    if (options.returnJaxrayDataset) {
-      return dataset;
-    }
 
     const metadata: DatasetMetadata = {
       dataset: metadataDataset,
       collection: metadataCollection,
       variant: metadataVariant,
       path: resolvedPath,
-      cid,
+      cid: cid,
+      url: sourceUrl,
+      timestamp: urlFetchResult?.timestamp,
+      source: options.cid ? "direct_cid" : "catalog",
       fetchedAt: new Date(),
     };
 
-    return new GeoTemporalDataset(dataset, metadata);
+    if (options.returnJaxrayDataset) {
+      return [dataset, metadata];
+    }
+
+    return [new GeoTemporalDataset(dataset, metadata), metadata];
   }
 
   async selectDataset({
@@ -140,20 +147,21 @@ export class DClimateClient {
     request: DatasetRequest;
     selection: GeoSelectionOptions;
     options?: LoadDatasetOptions;
-  }): Promise<GeoTemporalDataset | Dataset> {
-    const dataset = await this.loadDataset({ request, options });
+  }): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
+    const [dataset, metadata] = await this.loadDataset({ request, options });
     if (!(dataset instanceof GeoTemporalDataset)) {
-      return dataset;
+      return [dataset, metadata];
     }
-    return dataset.select(selection);
+    return [await dataset.select(selection), metadata];
   }
 
   private async loadAndConcatenateVariants(
     request: DatasetRequest,
     concatVariants: DatasetVariantConfig[],
     options: LoadDatasetOptions
-  ): Promise<GeoTemporalDataset | Dataset> {
+  ): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
+    const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
 
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
@@ -168,16 +176,17 @@ export class DClimateClient {
         if (resolved.source.type === "cid") {
           cid = resolved.source.cid;
         } else {
-          cid = await this.fetchDatasetCidFromEndpoint(
+          const apiResponse = await this.fetchDatasetCidFromEndpoint(
             resolved.slug,
             resolved.source.url
           );
+          cid = apiResponse.cid!.trim();
         }
 
         // Load the dataset
         const dataset = await openDatasetFromCid(cid, {
           gatewayUrl,
-          ipfsElements: this.getIpfsElements(gatewayUrl),
+          ipfsElements,
         });
 
         return {
@@ -190,10 +199,6 @@ export class DClimateClient {
     // Concatenate the variants
     const concatenatedDataset = await concatenateVariants(variantsToLoad);
 
-    if (options.returnJaxrayDataset) {
-      return concatenatedDataset;
-    }
-
     // Build metadata for the concatenated dataset
     const metadata: DatasetMetadata = {
       dataset: request.dataset,
@@ -201,16 +206,21 @@ export class DClimateClient {
       concatenatedVariants: concatVariants.map((v) => v.variant),
       path: `${request.collection ?? ""}/${request.dataset}`,
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
+      source: "catalog",
       fetchedAt: new Date(),
     };
 
-    return new GeoTemporalDataset(concatenatedDataset, metadata);
+    if (options.returnJaxrayDataset) {
+      return [concatenatedDataset, metadata];
+    }
+
+    return [new GeoTemporalDataset(concatenatedDataset, metadata), metadata];
   }
 
   private async fetchDatasetCidFromEndpoint(
     slug: string,
     endpoint: string
-  ): Promise<string> {
+  ): Promise<DatasetApiResponse> {
     const response = await fetch(endpoint);
     if (!response.ok) {
       if (response.status === 404) {
@@ -232,10 +242,21 @@ export class DClimateClient {
       );
     }
 
-    return cid;
+    return payload;
   }
 
-  private getIpfsElements(gatewayUrl: string): IpfsElements {
+  private resolveIpfsElements(
+    options: LoadDatasetOptions,
+    gatewayUrl: string
+  ): IpfsElements {
+    // Priority: options.ipfsElements > clientIpfsElements > create from gatewayUrl
+    if (options.ipfsElements) {
+      return options.ipfsElements;
+    }
+    if (this.clientIpfsElements) {
+      return this.clientIpfsElements;
+    }
+    // Cache ipfsElements based on gateway URL
     if (this.cachedIpfs && this.cachedGateway === gatewayUrl) {
       return this.cachedIpfs;
     }

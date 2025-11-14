@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DClimateClient, GeoTemporalDataset } from "../src/index.js";
+import { DatasetMetadata, DClimateClient, GeoTemporalDataset } from "../src/index.js";
 import { InvalidSelectionError, NoDataFoundError } from "../src/errors.js";
 
 describe("GeoTemporalDataset - Real Data Integration Tests", () => {
@@ -36,7 +36,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("loading and accessing real dataset", () => {
     it("loads a real dataset and accesses metadata", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       expect(dataset.info.dataset).toBe("fpar");
       expect(dataset.info.cid).toBeDefined();
@@ -45,7 +45,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("provides access to variables", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
       const variables = dataset.variables;
 
       expect(Array.isArray(variables)).toBe(true);
@@ -53,7 +53,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("provides access to coordinates", async () => {
-      const dataset = await loadDataset("fpar");
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
       const coords = dataset.coords;
 
       expect(coords).toBeDefined();
@@ -61,7 +61,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("reports not empty for real dataset", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       expect(dataset.isEmpty()).toBe(false);
     });
@@ -69,7 +69,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("point selection on real data", () => {
     it("selects a point from real dataset", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       // New York City coordinates
       const point = await dataset.point(40.7128, -74.006);
@@ -79,7 +79,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("selects different geographic points", async () => {
-      const dataset = await loadDataset("ifs-temperature") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("ifs-temperature") as [GeoTemporalDataset, DatasetMetadata];
 
       // London coordinates
       const londonPoint = await dataset.point(51.5074, -0.1278);
@@ -92,7 +92,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("uses nearest method by default", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       // Use coordinates that might not exactly match grid
       const point = await dataset.point(40.5, -73.5, {
@@ -105,22 +105,22 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("time range selection on real data", () => {
     it("selects a time range from real dataset", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
-
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
+      console.log(dataset);
       const timeSlice = await dataset.timeRange({
-        start: "2024-01-01T00:00:00Z",
-        end: "2024-01-07T00:00:00Z",
+        start: new Date("2024-01-01T00:00:00Z").toISOString(),
+        end: new Date("2024-01-07T00:00:00Z").toISOString(),
       });
 
       expect(timeSlice.isEmpty()).toBe(false);
     });
 
     it("accepts Date objects for time range", async () => {
-      const dataset = await loadDataset("ifs-precip") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("ifs-precip") as [GeoTemporalDataset, DatasetMetadata];
 
       const timeSlice = await dataset.timeRange({
-        start: new Date("2024-01-01"),
-        end: new Date("2024-01-03"),
+        start: new Date("2024-01-01").toISOString(),
+        end: new Date("2024-01-03").toISOString(),
       });
 
       expect(timeSlice.isEmpty()).toBe(false);
@@ -129,7 +129,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("combined selections on real data", () => {
     it("combines point and time range selections", async () => {
-      const dataset = await loadDataset("aifs-single-temperature") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("aifs-single-temperature") as [GeoTemporalDataset, DatasetMetadata];
 
       const selected = await dataset.select({
         point: {
@@ -137,8 +137,8 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
           longitude: -74.006,
         },
         timeRange: {
-          start: "2024-01-01T00:00:00Z",
-          end: "2024-01-07T00:00:00Z",
+          start: new Date("2024-01-01T00:00:00Z").toISOString(),
+          end: new Date("2024-01-07T00:00:00Z").toISOString(),
         },
       });
 
@@ -146,14 +146,14 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("chains point then time range", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       const result = await dataset
         .point(34.0522, -118.2437) // Los Angeles
         .then((d) =>
           d.timeRange({
-            start: "2024-01-01T00:00:00Z",
-            end: "2024-01-05T00:00:00Z",
+            start: new Date("2024-01-01T00:00:00Z").toISOString(),
+            end: new Date("2024-01-05T00:00:00Z").toISOString(),
           })
         );
 
@@ -161,12 +161,12 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("chains time range then point", async () => {
-      const dataset = await loadDataset("ifs-temperature") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("ifs-temperature") as [GeoTemporalDataset, DatasetMetadata];
 
       const result = await dataset
         .timeRange({
-          start: "2024-01-01T00:00:00Z",
-          end: "2024-01-10T00:00:00Z",
+          start: new Date("2024-01-01T00:00:00Z").toISOString(),
+          end: new Date("2024-01-10T00:00:00Z").toISOString(),
         })
         .then((d) => d.point(51.5074, -0.1278)); // London
 
@@ -176,7 +176,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("converting to records with real data", () => {
     it("converts point selection to records", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
       const point = await dataset.point(40.7128, -74.006) as GeoTemporalDataset;
 
       const variables = point.variables;
@@ -194,10 +194,10 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("converts time range selection to records", async () => {
-      const dataset = await loadDataset("ifs-precip") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("ifs-precip") as [GeoTemporalDataset, DatasetMetadata];
       const timeSlice = await dataset.timeRange({
-        start: "2024-01-01T00:00:00Z",
-        end: "2024-01-03T00:00:00Z",
+        start: new Date("2024-01-01T00:00:00Z").toISOString(),
+        end: new Date("2024-01-03T00:00:00Z").toISOString(),
       });
 
       const variables = timeSlice.variables;
@@ -209,7 +209,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("converts combined selection to records", async () => {
-      const dataset = await loadDataset("aifs-ensemble-temperature") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("aifs-ensemble-temperature") as [GeoTemporalDataset, DatasetMetadata];
 
       const selected = await dataset.select({
         point: {
@@ -217,8 +217,8 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
           longitude: -74.006,
         },
         timeRange: {
-          start: "2024-01-01T00:00:00Z",
-          end: "2024-01-05T00:00:00Z",
+          start: new Date("2024-01-01T00:00:00Z").toISOString(),
+          end: new Date("2024-01-05T00:00:00Z").toISOString(),
         },
       });
 
@@ -233,7 +233,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("metadata preservation through selections", () => {
     it("preserves metadata through point selection", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
       const originalCid = dataset.info.cid;
 
       const point = await dataset.point(40.7128, -74.006);
@@ -243,12 +243,12 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("preserves metadata through time range selection", async () => {
-      const dataset = await loadDataset("ifs-temperature") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("ifs-temperature") as [GeoTemporalDataset, DatasetMetadata];
       const originalCid = dataset.info.cid;
 
       const timeSlice = await dataset.timeRange({
-        start: "2024-01-01T00:00:00Z",
-        end: "2024-01-03T00:00:00Z",
+        start: new Date("2024-01-01T00:00:00Z").toISOString(),
+        end: new Date("2024-01-03T00:00:00Z").toISOString(),
       });
 
       expect(timeSlice.info.cid).toBe(originalCid);
@@ -257,15 +257,15 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
 
     it("preserves metadata through chained selections", async () => {
-      const dataset = await loadDataset("aifs-single-precip") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("aifs-single-precip") as [GeoTemporalDataset, DatasetMetadata];
       const originalCid = dataset.info.cid;
 
       const result = await dataset
         .point(40.7128, -74.006)
         .then((d) =>
           d.timeRange({
-            start: "2024-01-01T00:00:00Z",
-            end: "2024-01-03T00:00:00Z",
+            start: new Date("2024-01-01T00:00:00Z").toISOString(),
+            end: new Date("2024-01-03T00:00:00Z").toISOString(),
           })
         );
 
@@ -277,7 +277,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("testing multiple dataset types", () => {
     it("works with AIFS single datasets", async () => {
-      const dataset = await loadDataset("aifs-single-precip") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("aifs-single-precip") as [GeoTemporalDataset, DatasetMetadata];
       const point = await dataset.point(40.7128, -74.006);
 
       expect(point.isEmpty()).toBe(false);
@@ -287,25 +287,25 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
   describe("error handling with real data", () => {
     it("throws NoDataFoundError when selection results in no data", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       // Use a time range far in the future that likely has no data
       await expect(
         dataset.timeRange({
-          start: "2099-01-01T00:00:00Z",
-          end: "2099-01-02T00:00:00Z",
+          start: new Date("2099-01-01T00:00:00Z").toISOString(),
+          end: new Date("2099-01-02T00:00:00Z").toISOString(),
         })
       ).rejects.toThrow(NoDataFoundError);
     });
 
     it("throws InvalidSelectionError for invalid dimension", async () => {
-      const dataset = await loadDataset("fpar") as GeoTemporalDataset;
+      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       await expect(
         dataset.timeRange(
           {
-            start: "2024-01-01T00:00:00Z",
-            end: "2024-01-02T00:00:00Z",
+            start: new Date("2024-01-01T00:00:00Z").toISOString(),
+            end: new Date("2024-01-02T00:00:00Z").toISOString(),
           },
           "nonexistent-dimension"
         )

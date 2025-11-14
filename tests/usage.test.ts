@@ -45,8 +45,15 @@ describe("DClimateClient usage", () => {
       dataset: "temperature",
       variant: "ensemble",
     } as const;
-    const dataset = await client.loadDataset({ request }) as GeoTemporalDataset;
-    const point = await dataset.point(40.75, -73.99);
+    const [dataset, metadata] = await client.loadDataset({ request });
+
+    // Check metadata
+    expect(metadata.cid).toBe("bafy-ensemble-cid");
+    expect(metadata.timestamp).toBe(1761003843556);
+    expect(metadata.source).toBe("catalog");
+    expect(metadata.url).toBe(`${HydrogenEndpoint}/aifs-ensemble-temperature`);
+
+    const point = await (dataset as GeoTemporalDataset).point(40.75, -73.99);
     const slice = await point.timeRange({
       start: "2023-01-01T00:00:00Z",
       end: "2023-01-07T00:00:00Z",
