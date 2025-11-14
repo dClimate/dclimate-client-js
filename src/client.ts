@@ -97,10 +97,13 @@ export class DClimateClient {
     } else {
       const resolved = resolveDatasetSource(request);
 
-      resolvedPath = resolved.path;
       metadataDataset = resolved.dataset;
       metadataCollection = resolved.collection;
       metadataVariant = resolved.variant ?? "";
+
+      // Build path from original names, preserving underscores
+      const pathParts = [resolved.collection, resolved.dataset, resolved.variant].filter(Boolean);
+      resolvedPath = pathParts.join("-");
 
       if (resolved.source.type === "cid") {
         cid = resolved.source.cid;
@@ -200,11 +203,12 @@ export class DClimateClient {
     const concatenatedDataset = await concatenateVariants(variantsToLoad);
 
     // Build metadata for the concatenated dataset
+    const pathParts = [request.collection, request.dataset].filter(Boolean);
     const metadata: DatasetMetadata = {
       dataset: request.dataset,
       collection: request.collection,
       concatenatedVariants: concatVariants.map((v) => v.variant),
-      path: `${request.collection ?? ""}/${request.dataset}`,
+      path: pathParts.join("-"),
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "catalog",
       fetchedAt: new Date(),

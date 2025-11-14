@@ -104,7 +104,7 @@ describe("loadDataset CID resolution", () => {
         throw new Error("Expected GeoTemporalDataset");
       }
 
-      expect(dataset.info.path).toBe("era5-10m-v-wind-non-finalized");
+      expect(dataset.info.path).toBe("era5-10m_v_wind-non-finalized");
       expect(dataset.info.variant).toBe("non-finalized");
     });
   });

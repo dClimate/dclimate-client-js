@@ -99,6 +99,23 @@ export class FakeDataset {
     return new FakeDataset(filtered);
   }
 
+  getVariable(name: string): any {
+    if (name !== "precipitation") {
+      return null;
+    }
+    // Return an object that mimics a DataArray with compute() and toRecords()
+    return {
+      compute: async () => ({
+        toRecords: () => this.internalRecords.map((record) => ({
+          latitude: record.latitude,
+          longitude: record.longitude,
+          time: record.time,
+          value: record.value,
+        }))
+      })
+    };
+  }
+
   async toRecords(
     variableName: string
   ): Promise<Array<Record<CoordinateKey | "value", number | string>>> {

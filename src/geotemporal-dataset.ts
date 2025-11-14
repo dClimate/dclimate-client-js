@@ -68,35 +68,13 @@ export class GeoTemporalDataset {
     varName: string,
     options?: { precision?: number }
   ): Promise<Array<Record<string, unknown>>> {
-    const datasetAny = this.dataset as unknown as {
-      getVariable?: (name: string) => DataArray | undefined;
-      toRecords?: (
-        name: string,
-        opts?: { precision?: number }
-      ) => Array<Record<string, unknown>> | Promise<Array<Record<string, unknown>>>;
-    };
-
-    if (typeof datasetAny.getVariable === "function") {
-      const variable = datasetAny.getVariable(varName);
-      if (variable) {
-        const materialized =
-          variable.isLazy && typeof variable.compute === "function"
-            ? await variable.compute()
-            : variable;
-        if (typeof materialized.toRecords === "function") {
-          return materialized.toRecords(options) as Array<Record<string, unknown>>;
-        }
-      }
+    const dataArray = this.dataset.getVariable(varName);
+    if (!dataArray) {
+      throw new Error(`Variable "${varName}" not found in dataset.`);
     }
-
-    if (typeof datasetAny.toRecords === "function") {
-      const result = datasetAny.toRecords(varName, options);
-      return result instanceof Promise ? await result : result;
-    }
-
-    throw new Error(
-      `Dataset cannot be converted to records for variable "${varName}".`
-    );
+    const computedArray = await dataArray.compute();
+    const result = computedArray.toRecords(options);
+    return result;
   }
 
   getVariable(name: string): DataArray {

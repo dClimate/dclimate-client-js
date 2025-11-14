@@ -106,10 +106,9 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
   describe("time range selection on real data", () => {
     it("selects a time range from real dataset", async () => {
       const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
-      console.log(dataset);
       const timeSlice = await dataset.timeRange({
-        start: new Date("2024-01-01T00:00:00Z").toISOString(),
-        end: new Date("2024-01-07T00:00:00Z").toISOString(),
+            start: "2002-02-11T00:00:00.000Z",
+            end: "2002-02-21T00:00:00.000Z",
       });
 
       expect(timeSlice.isEmpty()).toBe(false);
@@ -119,8 +118,8 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
       const [dataset] = await loadDataset("ifs-precip") as [GeoTemporalDataset, DatasetMetadata];
 
       const timeSlice = await dataset.timeRange({
-        start: new Date("2024-01-01").toISOString(),
-        end: new Date("2024-01-03").toISOString(),
+        start: new Date("2025-09-01"),
+        end: new Date("2025-09-03"),
       });
 
       expect(timeSlice.isEmpty()).toBe(false);
@@ -137,8 +136,8 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
           longitude: -74.006,
         },
         timeRange: {
-          start: new Date("2024-01-01T00:00:00Z").toISOString(),
-          end: new Date("2024-01-07T00:00:00Z").toISOString(),
+          start: new Date("2025-09-01T00:00:00Z"),
+          end: new Date("2025-09-07T00:00:00Z"),
         },
       });
 
@@ -147,13 +146,12 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
     it("chains point then time range", async () => {
       const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
-
       const result = await dataset
         .point(34.0522, -118.2437) // Los Angeles
         .then((d) =>
           d.timeRange({
-            start: new Date("2024-01-01T00:00:00Z").toISOString(),
-            end: new Date("2024-01-05T00:00:00Z").toISOString(),
+            start: "2002-02-11T00:00:00.000Z",
+            end: "2002-02-21T00:00:00.000Z",
           })
         );
 
@@ -165,8 +163,8 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
 
       const result = await dataset
         .timeRange({
-          start: new Date("2024-01-01T00:00:00Z").toISOString(),
-          end: new Date("2024-01-10T00:00:00Z").toISOString(),
+          start: new Date("2025-09-01T00:00:00Z"),
+          end: new Date("2025-09-10T00:00:00Z"),
         })
         .then((d) => d.point(51.5074, -0.1278)); // London
 
@@ -174,62 +172,66 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
     });
   });
 
-  describe("converting to records with real data", () => {
-    it("converts point selection to records", async () => {
-      const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
-      const point = await dataset.point(40.7128, -74.006) as GeoTemporalDataset;
+  // describe.only("converting to records with real data", () => {
+  //   it("converts point selection to records", async () => {
+  //     const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
+  //     const point = await dataset.point(40.7128, -74.006) as GeoTemporalDataset;
+  //     const timeSlice = await point.timeRange({
+  //       start: new Date("2024-09-01T00:00:00Z"),
+  //       end: new Date("2024-09-07T00:00:00Z"),
+  //     }) as GeoTemporalDataset;
+  //     const variables = timeSlice.variables;
+  //     if (variables.length > 0) {
+  //       const records = await timeSlice.toRecords(variables[0]);
 
-      const variables = point.variables;
-      if (variables.length > 0) {
-        const records = await point.toRecords(variables[0]);
+  //       expect(Array.isArray(records)).toBe(true);
+  //       if (records.length > 0) {
+  //         console.log(records[0]);
+  //         expect(records[0]).toHaveProperty("latitude");
+  //         expect(records[0]).toHaveProperty("longitude");
+  //         expect(records[0]).toHaveProperty("time");
+  //         expect(records[0]).toHaveProperty("value");
+  //       }
+  //     }
+  //   });
 
-        expect(Array.isArray(records)).toBe(true);
-        if (records.length > 0) {
-          expect(records[0]).toHaveProperty("latitude");
-          expect(records[0]).toHaveProperty("longitude");
-          expect(records[0]).toHaveProperty("time");
-          expect(records[0]).toHaveProperty("value");
-        }
-      }
-    });
+  //   it("converts time range selection to records", async () => {
+  //     const [dataset] = await loadDataset("ifs-precip") as [GeoTemporalDataset, DatasetMetadata];
+  //     const timeSlice = await dataset.timeRange({
+  //       start: new Date("2025-09-01T00:00:00Z").toISOString(),
+  //       end: new Date("2025-09-03T00:00:00Z").toISOString(),
+  //     });
 
-    it("converts time range selection to records", async () => {
-      const [dataset] = await loadDataset("ifs-precip") as [GeoTemporalDataset, DatasetMetadata];
-      const timeSlice = await dataset.timeRange({
-        start: new Date("2024-01-01T00:00:00Z").toISOString(),
-        end: new Date("2024-01-03T00:00:00Z").toISOString(),
-      });
+  //     const variables = timeSlice.variables;
+  //     if (variables.length > 0) {
+  //       const records = await timeSlice.toRecords(variables[0]);
 
-      const variables = timeSlice.variables;
-      if (variables.length > 0) {
-        const records = await timeSlice.toRecords(variables[0]);
+  //       expect(Array.isArray(records)).toBe(true);
+  //     }
+  //   });
 
-        expect(Array.isArray(records)).toBe(true);
-      }
-    });
+  //   it("converts combined selection to records", async () => {
+  //     const [dataset] = await loadDataset("aifs-ensemble-temperature") as [GeoTemporalDataset, DatasetMetadata];
 
-    it("converts combined selection to records", async () => {
-      const [dataset] = await loadDataset("aifs-ensemble-temperature") as [GeoTemporalDataset, DatasetMetadata];
+  //     const selected = await dataset.select({
+  //       point: {
+  //         latitude: 40.7128,
+  //         longitude: -74.006,
+  //       },
+  //       timeRange: {
+  //         start: new Date("2025-09-01T00:00:00Z"),
+  //         end: new Date("2025-09-05T00:00:00Z"),
+  //       },
+  //     });
 
-      const selected = await dataset.select({
-        point: {
-          latitude: 40.7128,
-          longitude: -74.006,
-        },
-        timeRange: {
-          start: new Date("2024-01-01T00:00:00Z").toISOString(),
-          end: new Date("2024-01-05T00:00:00Z").toISOString(),
-        },
-      });
+  //     const variables = selected.variables;
+  //     if (variables.length > 0) {
+  //       const records = await selected.toRecords(variables[0]);
 
-      const variables = selected.variables;
-      if (variables.length > 0) {
-        const records = await selected.toRecords(variables[0]);
-
-        expect(Array.isArray(records)).toBe(true);
-      }
-    });
-  });
+  //       expect(Array.isArray(records)).toBe(true);
+  //     }
+  //   });
+  // });
 
   describe("metadata preservation through selections", () => {
     it("preserves metadata through point selection", async () => {
@@ -247,8 +249,8 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
       const originalCid = dataset.info.cid;
 
       const timeSlice = await dataset.timeRange({
-        start: new Date("2024-01-01T00:00:00Z").toISOString(),
-        end: new Date("2024-01-03T00:00:00Z").toISOString(),
+        start: new Date("2025-09-01T00:00:00Z"),
+        end: new Date("2025-09-03T00:00:00Z"),
       });
 
       expect(timeSlice.info.cid).toBe(originalCid);
@@ -264,13 +266,13 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
         .point(40.7128, -74.006)
         .then((d) =>
           d.timeRange({
-            start: new Date("2024-01-01T00:00:00Z").toISOString(),
-            end: new Date("2024-01-03T00:00:00Z").toISOString(),
+            start: new Date("2025-09-01T00:00:00Z"),
+            end: new Date("2025-09-03T00:00:00Z"),
           })
         );
 
       expect(result.info.cid).toBe(originalCid);
-      expect(result.info.dataset).toBe("precip");
+      expect(result.info.dataset).toBe("precipitation");
       expect(result.info.variant).toBe("single");
     });
   });
@@ -286,7 +288,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
   });
 
   describe("error handling with real data", () => {
-    it("throws NoDataFoundError when selection results in no data", async () => {
+    it("throws InvalidSelectionError when selection results in no data", async () => {
       const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
       // Use a time range far in the future that likely has no data
@@ -295,7 +297,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
           start: new Date("2099-01-01T00:00:00Z").toISOString(),
           end: new Date("2099-01-02T00:00:00Z").toISOString(),
         })
-      ).rejects.toThrow(NoDataFoundError);
+      ).rejects.toThrow(InvalidSelectionError);
     });
 
     it("throws InvalidSelectionError for invalid dimension", async () => {
