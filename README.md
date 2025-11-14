@@ -120,7 +120,7 @@ const [finalized, metadata] = await client.loadDataset({
 ### Selecting while loading
 
 ```typescript
-const subset = await client.selectDataset({
+const [subset, metadata] = await client.selectDataset({
   request: {
     collection: "aifs",
     dataset: "temperature",
