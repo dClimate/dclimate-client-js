@@ -26,7 +26,7 @@ describe("Dataset metadata", () => {
     expect(metadata.cid.length).toBeGreaterThan(0);
 
     // Verify source metadata
-    expect(metadata.source).toBe("catalog");
+    expect(metadata.source).toBe("stac");
 
     // Verify fetchedAt
     expect(metadata.fetchedAt).toBeInstanceOf(Date);
@@ -64,7 +64,7 @@ describe("Dataset metadata", () => {
     expect(metadata.variant).toBe("finalized");
     expect(metadata.path).toBe("era5-2m_temperature-finalized");
     expect(metadata.cid).toBeDefined();
-    expect(metadata.source).toBe("catalog");
+    expect(metadata.source).toBe("stac");
     expect(metadata.fetchedAt).toBeInstanceOf(Date);
     expect(metadata.concatenatedVariants).toBeUndefined();
   }, 30000);
@@ -95,13 +95,10 @@ describe("Dataset metadata", () => {
     expect(Array.isArray(metadata.concatenatedVariants)).toBe(true);
     expect(metadata.concatenatedVariants!.length).toBeGreaterThan(0);
     expect(metadata.concatenatedVariants).toContain("finalized");
-    expect(metadata.concatenatedVariants).toContain("non-finalized");
-
-    // Variant should be undefined or a concatenated value
-    expect(metadata.variant).toBeUndefined();
+    expect(metadata.concatenatedVariants).toContain("non_finalized");
 
     // Verify source metadata
-    expect(metadata.source).toBe("catalog");
+    expect(metadata.source).toBe("stac_concatenated");
     expect(metadata.fetchedAt).toBeInstanceOf(Date);
 
     // Verify dataset.info matches metadata
@@ -157,7 +154,7 @@ describe("Dataset metadata", () => {
     }
   }, 30000);
 
-  it("metadata timestamp is a valid Unix timestamp in milliseconds", async () => {
+  it("metadata does not include timestamp field (removed in STAC migration)", async () => {
     const client = new DClimateClient();
 
     const [, metadata] = await client.loadDataset({
@@ -167,18 +164,12 @@ describe("Dataset metadata", () => {
       },
     }) as [GeoTemporalDataset, DatasetMetadata];
 
-    expect(metadata.timestamp).toBeDefined();
+    // timestamp field was removed in STAC migration
+    expect((metadata as any).timestamp).toBeUndefined();
 
-    // Verify it's a number
-    expect(typeof metadata.timestamp).toBe("number");
-
-    // Verify it's in milliseconds (should be 13 digits for current timestamps)
-    expect(metadata.timestamp!.toString().length).toBeGreaterThanOrEqual(13);
-
-    // Verify it's a reasonable date (after 2020 and before 2100)
-    const date = new Date(metadata.timestamp!);
-    expect(date.getFullYear()).toBeGreaterThanOrEqual(2020);
-    expect(date.getFullYear()).toBeLessThan(2100);
+    // fetchedAt is the replacement for timestamp
+    expect(metadata.fetchedAt).toBeDefined();
+    expect(metadata.fetchedAt).toBeInstanceOf(Date);
   }, 30000);
 
   it("metadata fetchedAt is close to current time", async () => {

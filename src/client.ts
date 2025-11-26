@@ -19,6 +19,14 @@ import {
   DatasetVariantConfig,
 } from "./datasets.js";
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
+import {
+  loadStacCatalog,
+  resolveDatasetCidFromStac,
+  getConcatenableItemsFromStac,
+  listAvailableDatasetsFromStac,
+  type StacCatalog,
+  type ConcatenableStacItem,
+} from "./stac/index.js";
 
 interface DatasetApiResponse {
   dataset?: string;
@@ -31,18 +39,37 @@ export class DClimateClient {
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
   private clientIpfsElements?: IpfsElements;
+  private stacCatalog?: StacCatalog;
+  private stacCatalogTimestamp?: number;
+  private stacCacheTtl: number = 3600000; // 1 hour
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
     this.clientIpfsElements = options.ipfsElements;
   }
 
-  listAvailableDatasets(): DatasetCatalog {
-    return listDatasetCatalog();
+  private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
+    // Check if cached catalog is still valid
+    if (this.stacCatalog && this.stacCatalogTimestamp) {
+      const age = Date.now() - this.stacCatalogTimestamp;
+      if (age < this.stacCacheTtl) {
+        return this.stacCatalog;
+      }
+    }
+
+    // Load fresh catalog
+    this.stacCatalog = await loadStacCatalog(gatewayUrl);
+    this.stacCatalogTimestamp = Date.now();
+    return this.stacCatalog;
   }
 
-  listCatalogEntries(): DatasetCatalog {
-    return listDatasetCatalog();
+  async listAvailableDatasets(): Promise<DatasetCatalog> {
+    const catalog = await this.getStacCatalog(this.gatewayUrl);
+    return listAvailableDatasetsFromStac(catalog);
+  }
+
+  async listCatalogEntries(): Promise<DatasetCatalog> {
+    return this.listAvailableDatasets();
   }
 
   async loadDataset({
@@ -64,22 +91,30 @@ export class DClimateClient {
       throw new DatasetNotFoundError("Dataset name must be provided.");
     }
 
-    // Skip auto-concatenation if explicit CID is provided
-    if (!options.cid && autoConcatenate) {
-      // Try to get concatenable variants
-      const concatVariants = getConcatenableVariants({
-        dataset: request.dataset,
-        collection: request.collection,
-      });
+    // Skip auto-concatenation if explicit CID or variant is provided
+    if (!options.cid && !request.variant && autoConcatenate) {
+      // Load STAC catalog to check for concatenable variants
+      const catalog = await this.getStacCatalog(gatewayUrl);
 
-      if (concatVariants.length > 1) {
-        // Load and concatenate multiple variants
+      // Get all items for this collection/dataset
+      const concatenableItems = getConcatenableItemsFromStac(
+        catalog,
+        request.collection || "",
+        request.dataset
+      );
+
+      if (concatenableItems.length > 1) {
+        // Multiple variants with concat metadata found
+        // Load and concatenate based on dclimate:concatPriority
         return this.loadAndConcatenateVariants(
           request,
-          concatVariants,
+          concatenableItems,
           options
         );
       }
+
+      // Single item found - proceed with single variant loading below
+      // If no items found, will error in resolution step
     }
 
     // Fall back to single variant loading
@@ -88,33 +123,31 @@ export class DClimateClient {
     let metadataDataset = request.dataset;
     let metadataCollection = request.collection;
     let metadataVariant = request.variant ?? "";
-    let urlFetchResult: DatasetApiResponse | undefined;
-    let sourceUrl: string | undefined;
 
     if (options.cid) {
+      // Direct CID provided - bypass catalog
       cid = options.cid;
       resolvedPath = normalizedDatasetKey;
     } else {
-      const resolved = resolveDatasetSource(request);
+      // Use STAC catalog resolution
+      const catalog = await this.getStacCatalog(gatewayUrl);
 
-      metadataDataset = resolved.dataset;
-      metadataCollection = resolved.collection;
-      metadataVariant = resolved.variant ?? "";
+      // Resolve CID from STAC
+      cid = resolveDatasetCidFromStac(
+        catalog,
+        request.collection || "",
+        request.dataset,
+        request.variant
+      );
 
-      // Build path from original names, preserving underscores
-      const pathParts = [resolved.collection, resolved.dataset, resolved.variant].filter(Boolean);
+      // Update metadata with resolved values
+      metadataCollection = request.collection || "";
+      metadataDataset = request.dataset;
+      metadataVariant = request.variant || "";
+
+      // Build path from resolved names
+      const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
       resolvedPath = pathParts.join("-");
-
-      if (resolved.source.type === "cid") {
-        cid = resolved.source.cid;
-      } else {
-        sourceUrl = resolved.source.url;
-        urlFetchResult = await this.fetchDatasetCidFromEndpoint(
-          resolved.slug,
-          resolved.source.url
-        );
-        cid = urlFetchResult.cid!.trim();
-      }
     }
     const dataset = await openDatasetFromCid(cid, {
       gatewayUrl,
@@ -127,9 +160,7 @@ export class DClimateClient {
       variant: metadataVariant,
       path: resolvedPath,
       cid: cid,
-      url: sourceUrl,
-      timestamp: urlFetchResult?.timestamp,
-      source: options.cid ? "direct_cid" : "catalog",
+      source: options.cid ? "direct_cid" : "stac",
       fetchedAt: new Date(),
     };
 
@@ -160,7 +191,7 @@ export class DClimateClient {
 
   private async loadAndConcatenateVariants(
     request: DatasetRequest,
-    concatVariants: DatasetVariantConfig[],
+    concatVariants: ConcatenableStacItem[],
     options: LoadDatasetOptions
   ): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
@@ -210,7 +241,7 @@ export class DClimateClient {
       concatenatedVariants: concatVariants.map((v) => v.variant),
       path: pathParts.join("-"),
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
-      source: "catalog",
+      source: "stac_concatenated",
       fetchedAt: new Date(),
     };
 

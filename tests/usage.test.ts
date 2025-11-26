@@ -16,19 +16,7 @@ vi.mock("../src/ipfs/open-dataset.js", () => ({
 
 describe("DClimateClient usage", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", fetchMock);
-
-    fetchMock.mockReset();
-    fetchMock.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => ({
-        dataset: "aifs-ensemble-temperature",
-        cid: "bafy-ensemble-cid",
-        timestamp: 1761003843556,
-      }),
-    } as Response);
-
+    // Don't mock fetch - let STAC resolve naturally
     openDatasetFromCidMock.mockReset();
     openDatasetFromCidMock.mockImplementation(async () => createMockDataset());
   });
@@ -43,15 +31,17 @@ describe("DClimateClient usage", () => {
     const request = {
       collection: "aifs",
       dataset: "temperature",
-      variant: "ensemble",
+      variant: "single",
     } as const;
     const [dataset, metadata] = await client.loadDataset({ request });
 
-    // Check metadata
-    expect(metadata.cid).toBe("bafy-ensemble-cid");
-    expect(metadata.timestamp).toBe(1761003843556);
-    expect(metadata.source).toBe("catalog");
-    expect(metadata.url).toBe(`${HydrogenEndpoint}/aifs-ensemble-temperature`);
+    // Check metadata (using STAC resolution now)
+    expect(metadata.cid).toBeDefined();
+    expect(metadata.cid).toMatch(/^bafy/); // Real CID from STAC
+    expect(metadata.source).toBe("stac");
+    // timestamp and url fields removed in STAC migration
+    expect((metadata as any).timestamp).toBeUndefined();
+    expect((metadata as any).url).toBeUndefined();
 
     const point = await (dataset as GeoTemporalDataset).point(40.75, -73.99);
     const slice = await point.timeRange({
@@ -60,14 +50,11 @@ describe("DClimateClient usage", () => {
     });
     const records = await slice.toRecords("precipitation");
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenCalledWith(
-      `${HydrogenEndpoint}/aifs-ensemble-temperature`
-    );
+    // STAC loads the catalog from real API (not mocked)
 
     expect(openDatasetFromCidMock).toHaveBeenCalledTimes(1);
     expect(openDatasetFromCidMock).toHaveBeenCalledWith(
-      "bafy-ensemble-cid",
+      expect.stringMatching(/^bafy/), // Real CID from STAC
       expect.objectContaining({ gatewayUrl: DEFAULT_IPFS_GATEWAY })
     );
 
@@ -80,7 +67,7 @@ describe("DClimateClient usage", () => {
       longitude: -73.99,
       time: "2023-01-01T00:00:00.000Z",
     });
-    expect(slice.info.path).toBe("aifs-temperature-ensemble");
-    expect(slice.info.variant).toBe("ensemble");
+    expect(slice.info.path).toBe("aifs-temperature-single");
+    expect(slice.info.variant).toBe("single");
   });
 });

@@ -41,23 +41,19 @@ export interface DatasetMetadata {
   collection?: string;
   variant?: string;
   /**
-   * Array of variants that were concatenated together (if auto-concatenation was used)
+   * Array of variants that were concatenated together (if STAC-based concatenation was used)
    */
   concatenatedVariants?: string[];
+  /**
+   * Dimension used for concatenation (e.g., "time")
+   */
+  concatDimension?: string;
   path: string;
   cid: string;
   /**
-   * URL endpoint that was used to fetch the CID (if fetched from URL)
+   * Source type: "stac" for STAC resolution, "stac_concatenated" for STAC-based concatenation, or "direct_cid" for direct CID loading
    */
-  url?: string;
-  /**
-   * Unix timestamp in milliseconds when the dataset was last updated (if available from API)
-   */
-  timestamp?: number;
-  /**
-   * Source type: "catalog" for catalog resolution or "direct_cid" for direct CID loading
-   */
-  source: "catalog" | "direct_cid";
+  source: "stac" | "stac_concatenated" | "direct_cid";
   fetchedAt: Date;
 }
 

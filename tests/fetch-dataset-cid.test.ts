@@ -1,11 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Dataset } from "@dclimate/jaxray";
 import { DClimateClient } from "../src/index.js";
-import { DatasetNotFoundError } from "../src/errors.js";
-import { HydrogenEndpoint } from "../src/datasets.js";
+import { StacResolutionError } from "../src/stac/index.js";
 
 const openDatasetFromCidMock = vi.hoisted(() => vi.fn());
-const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../src/ipfs/open-dataset.js", () => ({
   openDatasetFromCid: openDatasetFromCidMock,
@@ -14,7 +12,6 @@ vi.mock("../src/ipfs/open-dataset.js", () => ({
 
 describe("loadDataset CID resolution", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", fetchMock);
     openDatasetFromCidMock.mockReset();
     openDatasetFromCidMock.mockResolvedValue({
       get: vi.fn(),
@@ -24,199 +21,135 @@ describe("loadDataset CID resolution", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
-    fetchMock.mockReset();
   });
 
-  describe("URL-backed variants", () => {
-    it("fetches the CID from the configured endpoint", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          dataset: "AIFS-SINGLE-PRECIP",
-          cid: "bafyfetch123",
-        }),
-      } as Response);
-
+  describe("STAC catalog resolution", () => {
+    it("resolves CID from STAC for known dataset", async () => {
       const client = new DClimateClient();
-      await client.loadDataset({ request: {
-        collection: "aifs",
-        dataset: "precipitation",
-        variant: "single",
-      }});
+      await client.loadDataset({
+        request: {
+          collection: "era5",
+          dataset: "2m_temperature",
+          variant: "finalized",
+        },
+      });
 
-      expect(fetchMock).toHaveBeenCalledWith(
-        `${HydrogenEndpoint}/aifs-single-precip`
-      );
+      // Should have called openDatasetFromCid with a real CID from STAC
       expect(openDatasetFromCidMock).toHaveBeenCalledWith(
-        "bafyfetch123",
+        expect.stringMatching(/^bafy/), // IPFS CID pattern
         expect.any(Object)
       );
     });
 
-    it("uses the slug as the metadata path regardless of the payload", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ cid: "bafyfetch456" }),
-      } as Response);
-
+    it("uses correct metadata path from STAC", async () => {
       const client = new DClimateClient();
-      const [dataset] = await client.loadDataset({ request: {
-        collection: "aifs",
-        dataset: "precipitation",
-        variant: "single",
-      }});
+      const [dataset] = await client.loadDataset({
+        request: {
+          collection: "era5",
+          dataset: "2m_temperature",
+          variant: "finalized",
+        },
+      });
 
       if (dataset instanceof Dataset) {
         throw new Error("Expected GeoTemporalDataset");
       }
 
-      expect(dataset.info.path).toBe("aifs-precipitation-single");
-    });
-  });
-
-  describe("CID-backed variants", () => {
-    it("skips fetching when CID is provided in the catalog", async () => {
-      const client = new DClimateClient();
-      await client.loadDataset({ request: {
-        collection: "era5",
-        dataset: "2m_temperature",
-        variant: "finalized",
-      }});
-
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(openDatasetFromCidMock).toHaveBeenCalledWith(
-        "bafyr4iacuutc5bgmirkfyzn4igi2wys7e42kkn674hx3c4dv4wrgjp2k2u",
-        expect.any(Object)
-      );
+      expect(dataset.info.path).toBe("era5-2m_temperature-finalized");
+      expect(dataset.info.collection).toBe("era5");
+      expect(dataset.info.dataset).toBe("2m_temperature");
+      expect(dataset.info.variant).toBe("finalized");
     });
 
-    it("normalizes variant names before lookup", async () => {
+    it("resolves single variant when no variant specified and only one exists", async () => {
       const client = new DClimateClient();
-      const [dataset] = await client.loadDataset({ request: {
-        collection: "era5",
-        dataset: "10m_v_wind",
-        variant: "NON_FINALIZED",
-      }});
+      const [dataset] = await client.loadDataset({
+        request: {
+          collection: "ifs",
+          dataset: "temperature",
+        },
+      });
 
       if (dataset instanceof Dataset) {
         throw new Error("Expected GeoTemporalDataset");
       }
 
-      expect(dataset.info.path).toBe("era5-10m_v_wind-non-finalized");
-      expect(dataset.info.variant).toBe("non-finalized");
-    });
-  });
-
-  describe("variant selection", () => {
-    it("uses the default variant when present", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ cid: "bafyifsdefault" }),
-      } as Response);
-
-      const client = new DClimateClient();
-      const [dataset] = await client.loadDataset({ request: {
-        collection: "ifs",
-        dataset: "temperature",
-      }});
-
-      if (dataset instanceof Dataset) {
-        throw new Error("Expected GeoTemporalDataset");
-      }
-
-      expect(dataset.info.variant).toBe("default");
+      // Should resolve to the single available variant
+      expect(dataset.info.collection).toBe("ifs");
+      expect(dataset.info.dataset).toBe("temperature");
+      expect(openDatasetFromCidMock).toHaveBeenCalled();
     });
 
-    it("throws when a variant is required but missing", async () => {
-      const client = new DClimateClient();
-
-      await expect(
-        client.loadDataset({ request: { collection: "era5", dataset: "2m_temperature" } })
-      ).rejects.toThrow('Dataset "2m_temperature" requires a variant to be specified.');
-    });
-
-    it("throws when the requested variant does not exist", async () => {
+    it("throws when collection not found", async () => {
       const client = new DClimateClient();
 
       await expect(
         client.loadDataset({
           request: {
-            collection: "ifs",
-            dataset: "precipitation",
-            variant: "ensemble",
-          }
+            collection: "unknown_collection",
+            dataset: "test",
+            variant: "test",
+          },
         })
-      ).rejects.toThrow('Variant "ensemble" is not available for dataset "precipitation".');
+      ).rejects.toThrow(StacResolutionError);
     });
-  });
 
-  describe("error handling", () => {
-    it("throws when the dataset is unknown", async () => {
+    it("throws when dataset not found", async () => {
       const client = new DClimateClient();
 
       await expect(
-        client.loadDataset({ request: {
-          collection: "aifs",
-          dataset: "unknown",
-          variant: "single",
-        }})
-      ).rejects.toThrow(DatasetNotFoundError);
+        client.loadDataset({
+          request: {
+            collection: "era5",
+            dataset: "unknown_dataset",
+            variant: "test",
+          },
+        })
+      ).rejects.toThrow(StacResolutionError);
     });
 
-    it("throws when the HTTP endpoint returns an error", async () => {
-      fetchMock.mockResolvedValue({
-        ok: false,
-        status: 404,
-        json: async () => ({}),
-      } as Response);
-
+    it("throws when variant not found", async () => {
       const client = new DClimateClient();
 
       await expect(
-        client.loadDataset({ request: {
-          collection: "aifs",
-          dataset: "precipitation",
-          variant: "single",
-        }})
-      ).rejects.toThrow(
-        `Dataset "aifs-precipitation-single" was not found at "${HydrogenEndpoint}/aifs-single-precip".`
-      );
-    });
-
-    it("throws when the endpoint omits a CID", async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ dataset: "AIFS-SINGLE-PRECIP" }),
-      } as Response);
-
-      const client = new DClimateClient();
-
-      await expect(
-        client.loadDataset({ request: {
-          collection: "aifs",
-          dataset: "precipitation",
-          variant: "single",
-        }})
-      ).rejects.toThrow(
-        `Dataset endpoint "${HydrogenEndpoint}/aifs-single-precip" did not provide a CID for "aifs-precipitation-single".`
-      );
+        client.loadDataset({
+          request: {
+            collection: "era5",
+            dataset: "2m_temperature",
+            variant: "unknown_variant",
+          },
+        })
+      ).rejects.toThrow(StacResolutionError);
     });
   });
 
   describe("explicit CID option", () => {
     it("bypasses catalog resolution", async () => {
       const client = new DClimateClient();
-      await client.loadDataset({ request: { dataset: "custom", }, options: { cid: "bafydirect" } });
+      await client.loadDataset({
+        request: { dataset: "custom" },
+        options: { cid: "bafydirect" },
+      });
 
-      expect(fetchMock).not.toHaveBeenCalled();
       expect(openDatasetFromCidMock).toHaveBeenCalledWith(
         "bafydirect",
         expect.any(Object)
       );
+    });
+
+    it("sets source to direct_cid in metadata", async () => {
+      const client = new DClimateClient();
+      const [dataset] = await client.loadDataset({
+        request: { dataset: "custom" },
+        options: { cid: "bafydirect" },
+      });
+
+      if (dataset instanceof Dataset) {
+        throw new Error("Expected GeoTemporalDataset");
+      }
+
+      expect(dataset.info.source).toBe("direct_cid");
+      expect(dataset.info.cid).toBe("bafydirect");
     });
   });
 });
