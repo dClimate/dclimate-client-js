@@ -4,10 +4,10 @@
  */
 
 import { Dataset } from "@dclimate/jaxray";
-import type { DatasetVariantConfig } from "../datasets.js";
+import type { ConcatenableStacItem } from "../stac/index.js";
 
 export interface VariantToLoad {
-  variant: DatasetVariantConfig;
+  variant: ConcatenableStacItem;
   dataset: Dataset;
 }
 

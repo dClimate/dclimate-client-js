@@ -4,7 +4,6 @@ import {
   DEFAULT_IPFS_GATEWAY,
 } from "../src/constants.js";
 import { createMockDataset, SAMPLE_RECORDS } from "./helpers/fake-dataset.js";
-import { HydrogenEndpoint } from "../src/datasets.js";
 
 const openDatasetFromCidMock = vi.hoisted(() => vi.fn());
 const fetchMock = vi.hoisted(() => vi.fn());

@@ -1,5 +1,3 @@
-import type { DatasetCatalog } from "../datasets.js";
-
 // ============================================================================
 // Error Classes
 // ============================================================================
@@ -28,6 +26,36 @@ export class StacResolutionError extends StacCatalogError {
 // ============================================================================
 // STAC Interfaces
 // ============================================================================
+
+export interface DatasetVariantConfig {
+  variant: string;
+  cid?: string;
+  /**
+   * Priority for auto-concatenation. Lower numbers = higher priority (loaded first).
+   * When multiple variants have concatPriority defined, they will be automatically
+   * concatenated in priority order (1, 2, 3, ...).
+   * Variants without concatPriority are not included in auto-concatenation.
+   */
+  concatPriority?: number;
+  /**
+   * Dimension along which to concatenate (default: "time").
+   * Only used when concatPriority is defined.
+   */
+  concatDimension?: string;
+}
+
+export interface CatalogDataset {
+  dataset: string;
+  variants: DatasetVariantConfig[];
+}
+
+export interface CatalogCollection {
+  collection: string;
+  datasets: CatalogDataset[];
+}
+
+export type DatasetCatalog = CatalogCollection[];
+
 
 export interface StacLink {
   rel: string;

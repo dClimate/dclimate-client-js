@@ -11,13 +11,7 @@ import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
 import { DatasetNotFoundError } from "./errors.js";
 import { normalizeSegment } from "./utils.js";
-import {
-  listDatasetCatalog,
-  resolveDatasetSource,
-  getConcatenableVariants,
-  type DatasetCatalog,
-  DatasetVariantConfig,
-} from "./datasets.js";
+
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
 import {
   loadStacCatalog,
@@ -27,12 +21,7 @@ import {
   type StacCatalog,
   type ConcatenableStacItem,
 } from "./stac/index.js";
-
-interface DatasetApiResponse {
-  dataset?: string;
-  cid?: string;
-  timestamp?: number;
-}
+import { DatasetCatalog } from "./stac/stac-catalog.js";
 
 export class DClimateClient {
   private gatewayUrl: string;
@@ -200,25 +189,8 @@ export class DClimateClient {
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
       concatVariants.map(async (variantConfig) => {
-        // Resolve the variant to get CID
-        const resolved = resolveDatasetSource({
-          ...request,
-          variant: variantConfig.variant,
-        });
-
-        let cid: string;
-        if (resolved.source.type === "cid") {
-          cid = resolved.source.cid;
-        } else {
-          const apiResponse = await this.fetchDatasetCidFromEndpoint(
-            resolved.slug,
-            resolved.source.url
-          );
-          cid = apiResponse.cid!.trim();
-        }
-
-        // Load the dataset
-        const dataset = await openDatasetFromCid(cid, {
+        // Load the dataset using the CID from STAC
+        const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
           ipfsElements,
         });
@@ -250,34 +222,6 @@ export class DClimateClient {
     }
 
     return [new GeoTemporalDataset(concatenatedDataset, metadata), metadata];
-  }
-
-  private async fetchDatasetCidFromEndpoint(
-    slug: string,
-    endpoint: string
-  ): Promise<DatasetApiResponse> {
-    const response = await fetch(endpoint);
-    if (!response.ok) {
-      if (response.status === 404) {
-        throw new DatasetNotFoundError(
-          `Dataset "${slug}" was not found at "${endpoint}".`
-        );
-      }
-
-      throw new DatasetNotFoundError(
-        `Failed to fetch dataset "${slug}" (status ${response.status}).`
-      );
-    }
-
-    const payload = (await response.json()) as DatasetApiResponse;
-    const cid = payload?.cid?.trim();
-    if (!cid) {
-      throw new DatasetNotFoundError(
-        `Dataset endpoint "${endpoint}" did not provide a CID for "${slug}".`
-      );
-    }
-
-    return payload;
   }
 
   private resolveIpfsElements(
