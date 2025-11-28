@@ -28,9 +28,10 @@ describe("DClimateClient usage", () => {
     const client = new DClimateClient();
 
     const request = {
-      collection: "aifs",
-      dataset: "temperature",
-      variant: "single",
+      collection: "era5",
+      organization: "ecmwf",
+      dataset: "precipitation_total",
+      variant: "finalized",
     } as const;
     const [dataset, metadata] = await client.loadDataset({ request });
 
@@ -66,7 +67,7 @@ describe("DClimateClient usage", () => {
       longitude: -73.99,
       time: "2023-01-01T00:00:00.000Z",
     });
-    expect(slice.info.path).toBe("aifs-temperature-single");
-    expect(slice.info.variant).toBe("single");
+    expect(slice.info.path).toBe("ecmwf_era5-precipitation_total-finalized");
+    expect(slice.info.variant).toBe("finalized");
   });
 });

@@ -6,22 +6,25 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 const client = new DClimateClient();
 
 const DATASET_REQUESTS: Record<string, any> = {
-  fpar: { collection: "copernicus", dataset: "fpar" },
-  "ifs-temperature": { collection: "ifs", dataset: "temperature" },
-  "ifs-precip": { collection: "ifs", dataset: "precipitation" },
+  fpar: { collection: "copernicus_clms", organization: "copernicus", dataset: "fpar", variant: "default" },
+  "ifs-temperature": { collection: "ifs", organization: "ecmwf", dataset: "temperature_forecast", variant: "default" },
+  "ifs-precip": { collection: "ifs", organization: "ecmwf", dataset: "precipitation_forecast", variant: "default" },
   "aifs-single-temperature": {
     collection: "aifs",
-    dataset: "temperature",
+    organization: "ecmwf",
+    dataset: "temperature_forecast",
     variant: "single",
   },
   "aifs-ensemble-temperature": {
     collection: "aifs",
-    dataset: "temperature",
+    organization: "ecmwf",
+    dataset: "temperature_forecast",
     variant: "ensemble",
   },
   "aifs-single-precip": {
     collection: "aifs",
-    dataset: "precipitation",
+    organization: "ecmwf",
+    dataset: "precipitation_forecast",
     variant: "single",
   },
 };
@@ -254,8 +257,8 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
       });
 
       expect(timeSlice.info.cid).toBe(originalCid);
-      expect(timeSlice.info.dataset).toBe("temperature");
-      expect(timeSlice.info.collection).toBe("ifs");
+      expect(timeSlice.info.dataset).toBe("temperature_forecast");
+      expect(timeSlice.info.collection).toBe("ecmwf_ifs");
     });
 
     it("preserves metadata through chained selections", async () => {
@@ -272,7 +275,7 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
         );
 
       expect(result.info.cid).toBe(originalCid);
-      expect(result.info.dataset).toBe("precipitation");
+      expect(result.info.dataset).toBe("precipitation_forecast");
       expect(result.info.variant).toBe("single");
     });
   });

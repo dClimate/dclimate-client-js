@@ -10,17 +10,19 @@ describe("Dataset metadata", () => {
     const [dataset, metadata] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "finalized",
       },
     }) as [GeoTemporalDataset, DatasetMetadata];
 
     // Verify metadata structure
     expect(metadata).toBeDefined();
-    expect(metadata.dataset).toBe("2m_temperature");
-    expect(metadata.collection).toBe("era5");
+    expect(metadata.dataset).toBe("temperature_2m");
+    expect(metadata.collection).toBe("ecmwf_era5");
     expect(metadata.variant).toBe("finalized");
-    expect(metadata.path).toBe("era5-2m_temperature-finalized");
+    expect(metadata.path).toBe("ecmwf_era5-temperature_2m-finalized");
+    expect(metadata.organization).toBe("ecmwf");
     expect(metadata.cid).toBeDefined();
     expect(typeof metadata.cid).toBe("string");
     expect(metadata.cid.length).toBeGreaterThan(0);
@@ -44,7 +46,8 @@ describe("Dataset metadata", () => {
     const [dataset, metadata] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "finalized",
       },
       options: {
@@ -59,10 +62,11 @@ describe("Dataset metadata", () => {
 
     // Verify metadata is still returned and complete
     expect(metadata).toBeDefined();
-    expect(metadata.dataset).toBe("2m_temperature");
-    expect(metadata.collection).toBe("era5");
+    expect(metadata.dataset).toBe("temperature_2m");
+    expect(metadata.collection).toBe("ecmwf_era5");
     expect(metadata.variant).toBe("finalized");
-    expect(metadata.path).toBe("era5-2m_temperature-finalized");
+    expect(metadata.path).toBe("ecmwf_era5-temperature_2m-finalized");
+    expect(metadata.organization).toBe("ecmwf");
     expect(metadata.cid).toBeDefined();
     expect(metadata.source).toBe("stac");
     expect(metadata.fetchedAt).toBeInstanceOf(Date);
@@ -75,7 +79,8 @@ describe("Dataset metadata", () => {
     const [dataset, metadata] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         // No variant specified - should auto-concatenate
       },
       options: {
@@ -85,9 +90,10 @@ describe("Dataset metadata", () => {
 
     // Verify metadata structure
     expect(metadata).toBeDefined();
-    expect(metadata.dataset).toBe("2m_temperature");
-    expect(metadata.collection).toBe("era5");
-    expect(metadata.path).toBe("era5-2m_temperature");
+    expect(metadata.dataset).toBe("temperature_2m");
+    expect(metadata.collection).toBe("ecmwf_era5");
+    expect(metadata.path).toBe("ecmwf_era5-temperature_2m");
+    expect(metadata.organization).toBe("ecmwf");
     expect(metadata.cid).toBeDefined();
 
     // Should have concatenatedVariants array
@@ -111,7 +117,8 @@ describe("Dataset metadata", () => {
     const [dataset, originalMetadata] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "finalized",
       },
     }) as [GeoTemporalDataset, DatasetMetadata];
@@ -134,7 +141,8 @@ describe("Dataset metadata", () => {
     const [, metadata] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "finalized",
       },
     }) as [GeoTemporalDataset, DatasetMetadata];
@@ -159,8 +167,9 @@ describe("Dataset metadata", () => {
 
     const [, metadata] = await client.loadDataset({
       request: {
-        collection: "ifs",
-        dataset: "temperature",
+        collection: "era5",
+        organization: "ecmwf",
+        dataset: "precipitation_total_land",
       },
     }) as [GeoTemporalDataset, DatasetMetadata];
 
@@ -179,7 +188,8 @@ describe("Dataset metadata", () => {
     const [, metadata] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "finalized",
       },
     }) as [GeoTemporalDataset, DatasetMetadata];

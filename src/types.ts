@@ -40,6 +40,7 @@ export interface DatasetMetadata {
   dataset: string;
   collection?: string;
   variant?: string;
+  organization?: string;
   /**
    * Array of variants that were concatenated together (if STAC-based concatenation was used)
    */
@@ -61,4 +62,5 @@ export interface DatasetRequest {
   dataset: string;
   collection?: string;
   variant?: string;
+  organization?: string;
 }

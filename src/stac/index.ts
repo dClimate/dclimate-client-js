@@ -1,6 +1,7 @@
 export {
   loadStacCatalog,
   resolveDatasetCidFromStac,
+  resolveDatasetFromStac,
   getConcatenableItemsFromStac,
   listAvailableDatasetsFromStac,
   getRootCatalogCid,
@@ -12,6 +13,8 @@ export {
   type StacAsset,
   type StacCatalogOptions,
   type ConcatenableStacItem,
+  type ResolvedDatasetFromStac,
+  type StacOrganization,
 } from "./stac-catalog.js";
 
 export {

@@ -29,7 +29,8 @@ describe("loadDataset CID resolution", () => {
       await client.loadDataset({
         request: {
           collection: "era5",
-          dataset: "2m_temperature",
+          organization: "ecmwf",
+          dataset: "temperature_2m",
           variant: "finalized",
         },
       });
@@ -46,7 +47,8 @@ describe("loadDataset CID resolution", () => {
       const [dataset] = await client.loadDataset({
         request: {
           collection: "era5",
-          dataset: "2m_temperature",
+          organization: "ecmwf",
+          dataset: "temperature_2m",
           variant: "finalized",
         },
       });
@@ -55,18 +57,20 @@ describe("loadDataset CID resolution", () => {
         throw new Error("Expected GeoTemporalDataset");
       }
 
-      expect(dataset.info.path).toBe("era5-2m_temperature-finalized");
-      expect(dataset.info.collection).toBe("era5");
-      expect(dataset.info.dataset).toBe("2m_temperature");
+      expect(dataset.info.path).toBe("ecmwf_era5-temperature_2m-finalized");
+      expect(dataset.info.collection).toBe("ecmwf_era5");
+      expect(dataset.info.dataset).toBe("temperature_2m");
       expect(dataset.info.variant).toBe("finalized");
+      expect(dataset.info.organization).toBe("ecmwf");
     });
 
     it("resolves single variant when no variant specified and only one exists", async () => {
       const client = new DClimateClient();
       const [dataset] = await client.loadDataset({
         request: {
-          collection: "ifs",
-          dataset: "temperature",
+          collection: "era5",
+          organization: "ecmwf",
+          dataset: "precipitation_total_land",
         },
       });
 
@@ -74,9 +78,9 @@ describe("loadDataset CID resolution", () => {
         throw new Error("Expected GeoTemporalDataset");
       }
 
-      // Should resolve to the single available variant
-      expect(dataset.info.collection).toBe("ifs");
-      expect(dataset.info.dataset).toBe("temperature");
+      expect(dataset.info.collection).toBe("ecmwf_era5");
+      expect(dataset.info.dataset).toBe("precipitation_total_land");
+      expect(dataset.info.variant).toBeDefined();
       expect(openDatasetFromCidMock).toHaveBeenCalled();
     });
 
@@ -87,6 +91,7 @@ describe("loadDataset CID resolution", () => {
         client.loadDataset({
           request: {
             collection: "unknown_collection",
+            organization: "ecmwf",
             dataset: "test",
             variant: "test",
           },
@@ -101,6 +106,7 @@ describe("loadDataset CID resolution", () => {
         client.loadDataset({
           request: {
             collection: "era5",
+            organization: "ecmwf",
             dataset: "unknown_dataset",
             variant: "test",
           },
@@ -115,7 +121,8 @@ describe("loadDataset CID resolution", () => {
         client.loadDataset({
           request: {
             collection: "era5",
-            dataset: "2m_temperature",
+            organization: "ecmwf",
+            dataset: "temperature_2m",
             variant: "unknown_variant",
           },
         })

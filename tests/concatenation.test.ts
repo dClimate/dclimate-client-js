@@ -11,7 +11,8 @@ describe("Dataset concatenation", () => {
     const [finalized] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "finalized",
       },
       options: {
@@ -23,7 +24,8 @@ describe("Dataset concatenation", () => {
     const [nonFinalized] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "non_finalized",
       },
       options: {
@@ -35,7 +37,8 @@ describe("Dataset concatenation", () => {
     const [concatenated] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
       },
       options: {
         autoConcatenate: true, // Explicit, but this is the default
@@ -118,7 +121,8 @@ describe("Dataset concatenation", () => {
     const [finalizedOnly] = await client.loadDataset({
       request: {
         collection: "era5",
-        dataset: "2m_temperature",
+        organization: "ecmwf",
+        dataset: "temperature_2m",
         variant: "finalized",
       },
     }) as [GeoTemporalDataset, DatasetMetadata];

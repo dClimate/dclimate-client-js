@@ -10,6 +10,7 @@ export {
 export {
   loadStacCatalog,
   resolveDatasetCidFromStac,
+  resolveDatasetFromStac,
   getConcatenableItemsFromStac,
   listAvailableDatasetsFromStac,
   getRootCatalogCid,
@@ -19,6 +20,8 @@ export {
   type StacItem,
   type StacCatalogOptions,
   type ConcatenableStacItem,
+  type ResolvedDatasetFromStac,
+  type StacOrganization,
   StacCatalogError,
   StacLoadError,
   StacResolutionError,

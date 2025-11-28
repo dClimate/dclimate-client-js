@@ -52,6 +52,9 @@ export interface CatalogDataset {
 export interface CatalogCollection {
   collection: string;
   datasets: CatalogDataset[];
+  organization?: string;
+  title?: string;
+  category?: string;
 }
 
 export type DatasetCatalog = CatalogCollection[];
@@ -96,6 +99,10 @@ export interface StacCollection {
   summaries?: Record<string, any>;
   links: StacLink[];
   items?: StacItem[]; // Loaded items
+  organizationId?: string;
+  organizationTitle?: string;
+  category?: string;
+  datasetNames?: string[];
 }
 
 export interface StacCatalog {
@@ -106,6 +113,7 @@ export interface StacCatalog {
   description?: string;
   links: StacLink[];
   collections?: StacCollection[]; // Loaded collections
+  organizations?: StacOrganization[];
 }
 
 interface CatalogCacheEntry {
@@ -125,6 +133,21 @@ export interface ConcatenableStacItem {
   cid: string;
   concatPriority: number;
   concatDimension: string;
+}
+
+export interface StacOrganization {
+  id: string;
+  title?: string;
+  link: StacLink;
+  catalog: StacCatalog;
+}
+
+export interface ResolvedDatasetFromStac {
+  cid: string;
+  collectionId: string;
+  organizationId?: string;
+  dataset: string;
+  variant: string;
 }
 
 // ============================================================================
@@ -155,6 +178,42 @@ function setCachedCatalog(gatewayUrl: string, catalog: StacCatalog, rootCid: str
     timestamp: Date.now(),
     rootCid,
   });
+}
+
+function extractCollectionsFromOrgLink(link: StacLink): Set<string> {
+  const collections = new Set<string>();
+  Object.entries(link).forEach(([key, value]) => {
+    if (!key.startsWith("dclimate:collections")) return;
+    if (Array.isArray(value)) {
+      for (const v of value) {
+        if (typeof v === "string") {
+          collections.add(v);
+        }
+      }
+    }
+  });
+  return collections;
+}
+
+function extractDatasetSlugsFromOrgLink(link: StacLink): string[] {
+  const datasets = link["dclimate:datasets"];
+  if (!Array.isArray(datasets)) return [];
+  return datasets.filter((d): d is string => typeof d === "string");
+}
+
+function buildCollectionCategoryMap(link: StacLink): Map<string, string> {
+  const map = new Map<string, string>();
+  Object.entries(link).forEach(([key, value]) => {
+    if (!key.startsWith("dclimate:collections:")) return;
+    const category = key.split(":").pop();
+    if (!category || !Array.isArray(value)) return;
+    for (const coll of value) {
+      if (typeof coll === "string") {
+        map.set(coll, category);
+      }
+    }
+  });
+  return map;
 }
 
 // ============================================================================
@@ -215,7 +274,6 @@ export async function loadStacCatalog(
   const cid = rootCid || (await getRootCatalogCid());
 
   try {
-    // Load root catalog
     const catalogUrl = resolveIpfsUri(`ipfs://${cid}`, gatewayUrl);
     const catalogResponse = await fetch(catalogUrl);
 
@@ -225,53 +283,97 @@ export async function loadStacCatalog(
 
     const catalog: StacCatalog = await catalogResponse.json();
 
-    // Load collections recursively
+    const organizations: StacOrganization[] = [];
     const collections: StacCollection[] = [];
-    const collectionLinks = catalog.links.filter((link) => link.rel === "child");
+    const orgLinks = catalog.links.filter(
+      (link) => link.rel === "child" && typeof link?.["dclimate:id"] === "string"
+    );
 
-    for (const link of collectionLinks) {
+    for (const link of orgLinks) {
+      const orgId = link["dclimate:id"] as string;
+      const orgUrl = resolveIpfsUri(link.href, gatewayUrl);
+      const collectionCategories = buildCollectionCategoryMap(link);
+      const datasetSlugs = extractDatasetSlugsFromOrgLink(link);
+
       try {
-        const collectionUrl = resolveIpfsUri(link.href, gatewayUrl);
-        const collectionResponse = await fetch(collectionUrl);
-
-        if (!collectionResponse.ok) {
-          console.warn(`Failed to load collection from ${link.href}: ${collectionResponse.status}`);
+        const orgResponse = await fetch(orgUrl);
+        if (!orgResponse.ok) {
+          console.warn(`Failed to load organization catalog from ${link.href}: ${orgResponse.status}`);
           continue;
         }
 
-        const collection: StacCollection = await collectionResponse.json();
+        const orgCatalog: StacCatalog = await orgResponse.json();
+        organizations.push({
+          id: orgId,
+          title: link.title,
+          link,
+          catalog: orgCatalog,
+        });
 
-        // Load items for this collection
-        const items: StacItem[] = [];
-        const itemLinks = collection.links.filter((itemLink) => itemLink.rel === "item");
+        const collectionLinks = orgCatalog.links.filter((orgLink) => orgLink.rel === "child");
 
-        for (const itemLink of itemLinks) {
+        for (const collectionLink of collectionLinks) {
           try {
-            const itemUrl = resolveIpfsUri(itemLink.href, gatewayUrl);
-            const itemResponse = await fetch(itemUrl);
+            const collectionUrl = resolveIpfsUri(collectionLink.href, gatewayUrl);
+            const collectionResponse = await fetch(collectionUrl);
 
-            if (!itemResponse.ok) {
-              console.warn(`Failed to load item from ${itemLink.href}: ${itemResponse.status}`);
+            if (!collectionResponse.ok) {
+              console.warn(`Failed to load collection from ${collectionLink.href}: ${collectionResponse.status}`);
               continue;
             }
 
-            const item: StacItem = await itemResponse.json();
-            items.push(item);
-          } catch (itemError) {
-            console.warn(`Error loading item ${itemLink.href}:`, itemError);
+            const collection: StacCollection = await collectionResponse.json();
+
+            // Load items for this collection
+            const items: StacItem[] = [];
+            const itemLinks = collection.links.filter((itemLink) => itemLink.rel === "item");
+
+            for (const itemLink of itemLinks) {
+              try {
+                const itemUrl = resolveIpfsUri(itemLink.href, gatewayUrl);
+                const itemResponse = await fetch(itemUrl);
+
+                if (!itemResponse.ok) {
+                  console.warn(`Failed to load item from ${itemLink.href}: ${itemResponse.status}`);
+                  continue;
+                }
+
+                const item: StacItem = await itemResponse.json();
+                items.push(item);
+              } catch (itemError) {
+                console.warn(`Error loading item ${itemLink.href}:`, itemError);
+              }
+            }
+
+            collection.items = items;
+            collection.organizationId = orgId;
+            collection.organizationTitle = link.title;
+            const category = collectionCategories.get(collection.id);
+            if (category) {
+              collection.category = category;
+            }
+
+            const datasetNames = datasetSlugs
+              .filter((slug) => slug.startsWith(`${collection.id}/`))
+              .map((slug) => slug.split("/")[1])
+              .filter(Boolean);
+            if (datasetNames.length) {
+              collection.datasetNames = datasetNames;
+            }
+
+            collections.push(collection);
+          } catch (collectionError) {
+            console.warn(`Error loading collection ${collectionLink.href}:`, collectionError);
           }
         }
-
-        collection.items = items;
-        collections.push(collection);
-      } catch (collectionError) {
-        console.warn(`Error loading collection ${link.href}:`, collectionError);
+      } catch (orgError) {
+        console.warn(`Error loading organization ${link.href}:`, orgError);
       }
     }
 
     catalog.collections = collections;
+    catalog.organizations = organizations;
 
-    // Cache the loaded catalog
     setCachedCatalog(gatewayUrl, catalog, cid);
 
     return catalog;
@@ -283,6 +385,189 @@ export async function loadStacCatalog(
   }
 }
 
+function selectCollectionFromCatalog(
+  catalog: StacCatalog,
+  collection: string,
+  dataset?: string,
+  organization?: string
+): { collection: StacCollection; organizationId?: string; resolvedCollectionId: string } {
+  const orgLinks = catalog.links.filter(
+    (link) => link.rel === "child" && typeof link?.["dclimate:id"] === "string"
+  );
+
+  const normalizedCollection =
+    organization && collection && !collection.startsWith(`${organization}_`)
+      ? `${organization}_${collection}`
+      : collection;
+
+  let resolvedOrganization = organization;
+
+  if (!resolvedOrganization) {
+    for (const link of orgLinks) {
+      const orgId = link["dclimate:id"] as string;
+      const declaredCollections = extractCollectionsFromOrgLink(link);
+      const datasetSlugs = extractDatasetSlugsFromOrgLink(link);
+      const datasetCollections = datasetSlugs
+        .map((slug) => (slug.includes("/") ? slug.split("/")[0] : slug))
+        .filter(Boolean);
+
+      const collectionMatches =
+        declaredCollections.has(normalizedCollection) ||
+        declaredCollections.has(collection) ||
+        declaredCollections.has(`${orgId}_${collection}`) ||
+        datasetCollections.includes(normalizedCollection) ||
+        datasetCollections.includes(collection) ||
+        datasetCollections.includes(`${orgId}_${collection}`);
+
+      const datasetMatches =
+        dataset &&
+        datasetSlugs.some(
+          (slug) =>
+            slug === `${normalizedCollection}/${dataset}` ||
+            slug === `${collection}/${dataset}` ||
+            slug === `${orgId}_${collection}/${dataset}`
+        );
+
+      if (collectionMatches || datasetMatches) {
+        resolvedOrganization = orgId;
+        break;
+      }
+    }
+  }
+
+  if (!resolvedOrganization) {
+    throw new StacResolutionError(
+      `Unable to determine organization for collection "${collection}". Provide an organization or verify the catalog metadata.`
+    );
+  }
+
+  const resolvedCollectionId =
+    normalizedCollection || `${resolvedOrganization}_${collection}`;
+
+  const collectionObj =
+    catalog.collections?.find(
+      (col) =>
+        col.organizationId === resolvedOrganization &&
+        (col.id === resolvedCollectionId || col.id === collection || col.id === `${resolvedOrganization}_${collection}`)
+    ) ||
+    catalog.collections?.find(
+      (col) =>
+        col.id === resolvedCollectionId || col.id === `${resolvedOrganization}_${collection}`
+    );
+
+  if (!collectionObj) {
+    throw new StacResolutionError(
+      `Collection "${collection}" not found under organization "${resolvedOrganization}".`
+    );
+  }
+
+  return {
+    collection: collectionObj,
+    organizationId: resolvedOrganization,
+    resolvedCollectionId: collectionObj.id,
+  };
+}
+
+/**
+ * Resolves a dataset from the STAC catalog, returning CID and resolved IDs.
+ */
+export function resolveDatasetFromStac(
+  catalog: StacCatalog,
+  collection: string,
+  dataset: string,
+  variant?: string,
+  organization?: string
+): ResolvedDatasetFromStac {
+  const { collection: collectionObj, organizationId, resolvedCollectionId } =
+    selectCollectionFromCatalog(catalog, collection, dataset, organization);
+
+  const matchingItems = collectionObj.items?.filter((item) => {
+    const prefix = `${collectionObj.id}-`;
+    const remainder = item.id.startsWith(prefix)
+      ? item.id.slice(prefix.length)
+      : item.id;
+    const parts = remainder.split("-");
+    const itemDataset = parts[0];
+    return itemDataset === dataset;
+  });
+
+  if (!matchingItems || matchingItems.length === 0) {
+    const availableDatasets =
+      collectionObj.items?.map((item) => {
+        const prefix = `${collectionObj.id}-`;
+        const remainder = item.id.startsWith(prefix)
+          ? item.id.slice(prefix.length)
+          : item.id;
+        return remainder.split("-")[0];
+      }) || [];
+    const uniqueDatasets = [...new Set(availableDatasets)];
+    throw new StacResolutionError(
+      `Dataset "${dataset}" not found in collection "${resolvedCollectionId}". Available datasets: ${uniqueDatasets.join(", ")}`
+    );
+  }
+
+  let selectedItem: StacItem | undefined;
+  let resolvedVariant = variant ?? "";
+  const candidates = matchingItems.map((item) => {
+    const prefix = `${collectionObj.id}-`;
+    const remainder = item.id.startsWith(prefix)
+      ? item.id.slice(prefix.length)
+      : item.id;
+    const parts = remainder.split("-");
+    const itemVariant = parts.slice(1).join("-") || "default";
+    return { item, variant: itemVariant };
+  });
+
+  if (variant) {
+    selectedItem = candidates.find((c) => c.variant === variant)?.item;
+    if (!selectedItem) {
+      const availableVariants = candidates.map((c) => c.variant);
+      throw new StacResolutionError(
+        `Variant "${variant}" not found for dataset "${resolvedCollectionId}-${dataset}". Available variants: ${availableVariants.join(", ")}`
+      );
+    }
+    resolvedVariant = variant;
+  } else {
+    if (candidates.length === 1) {
+      selectedItem = candidates[0].item;
+      resolvedVariant = candidates[0].variant;
+    } else {
+      const preferredOrder = ["default", "final", "finalized", "latest", ""];
+      for (const pref of preferredOrder) {
+        const match = candidates.find((c) => c.variant === pref);
+        if (match) {
+          selectedItem = match.item;
+          resolvedVariant = match.variant;
+          break;
+        }
+      }
+      if (!selectedItem) {
+        const availableVariants = candidates.map((c) => c.variant);
+        throw new StacResolutionError(
+          `Multiple variants available for "${resolvedCollectionId}-${dataset}". Please specify one of: ${availableVariants.join(", ")}`
+        );
+      }
+    }
+  }
+
+  if (!selectedItem?.assets?.data) {
+    throw new StacResolutionError(
+      `No data asset found for item "${selectedItem?.id ?? "unknown"}"`
+    );
+  }
+
+  const href = selectedItem.assets.data.href;
+  const cid = href.replace(/^ipfs:\/\//, "");
+
+  return {
+    cid,
+    collectionId: resolvedCollectionId,
+    organizationId,
+    dataset,
+    variant: resolvedVariant || "default",
+  };
+}
+
 /**
  * Resolves a dataset CID from the STAC catalog
  */
@@ -290,100 +575,16 @@ export function resolveDatasetCidFromStac(
   catalog: StacCatalog,
   collection: string,
   dataset: string,
-  variant?: string
+  variant?: string,
+  organization?: string
 ): string {
-  // Find collection in catalog
-  const collectionObj = catalog.collections?.find(
-    (col) =>
-      col.id === collection ||
-      catalog.links.some(
-        (link) =>
-          link.rel === "child" &&
-          link?.["dclimate:id"] === collection &&
-          link.href.includes(col.id)
-      )
-  );
-
-  if (!collectionObj) {
-    const availableCollections = catalog.collections?.map((c) => c.id) || [];
-    throw new StacResolutionError(
-      `Collection "${collection}" not found in STAC catalog. Available collections: ${availableCollections.join(", ")}`
-    );
-  }
-
-  // Find matching items
-  const matchingItems = collectionObj.items?.filter((item) => {
-    // Parse item ID: expected format is {collection}-{dataset}-{variant}
-    const parts = item.id.split("-");
-    if (parts.length < 2) return false;
-
-    const itemCollection = parts[0];
-    const itemDataset = parts[1];
-    const itemVariant = parts.slice(2).join("-") || "default";
-
-    return itemCollection === collection && itemDataset === dataset;
-  });
-
-  if (!matchingItems || matchingItems.length === 0) {
-    const availableDatasets = collectionObj.items?.map((item) => {
-      const parts = item.id.split("-");
-      return parts[1];
-    }) || [];
-    const uniqueDatasets = [...new Set(availableDatasets)];
-    throw new StacResolutionError(
-      `Dataset "${dataset}" not found in collection "${collection}". Available datasets: ${uniqueDatasets.join(", ")}`
-    );
-  }
-
-  // If variant specified, find exact match
-  if (variant) {
-    const item = matchingItems.find((item) => {
-      const parts = item.id.split("-");
-      const itemVariant = parts.slice(2).join("-") || "default";
-      return itemVariant === variant;
-    });
-
-    if (!item) {
-      const availableVariants = matchingItems.map((item) => {
-        const parts = item.id.split("-");
-        return parts.slice(2).join("-") || "default";
-      });
-      throw new StacResolutionError(
-        `Variant "${variant}" not found for dataset "${collection}-${dataset}". Available variants: ${availableVariants.join(", ")}`
-      );
-    }
-
-    // Extract CID from asset
-    const dataAsset = item.assets.data;
-    if (!dataAsset) {
-      throw new StacResolutionError(
-        `No data asset found for item "${item.id}"`
-      );
-    }
-
-    return dataAsset.href.replace(/^ipfs:\/\//, "");
-  }
-
-  // No variant specified - if only one item, return it
-  if (matchingItems.length === 1) {
-    const item = matchingItems[0];
-    const dataAsset = item.assets.data;
-    if (!dataAsset) {
-      throw new StacResolutionError(
-        `No data asset found for item "${item.id}"`
-      );
-    }
-    return dataAsset.href.replace(/^ipfs:\/\//, "");
-  }
-
-  // Multiple variants available, user must specify
-  const availableVariants = matchingItems.map((item) => {
-    const parts = item.id.split("-");
-    return parts.slice(2).join("-") || "default";
-  });
-  throw new StacResolutionError(
-    `Multiple variants available for "${collection}-${dataset}". Please specify one of: ${availableVariants.join(", ")}`
-  );
+  return resolveDatasetFromStac(
+    catalog,
+    collection,
+    dataset,
+    variant,
+    organization
+  ).cid;
 }
 
 /**
@@ -392,25 +593,15 @@ export function resolveDatasetCidFromStac(
 export function getConcatenableItemsFromStac(
   catalog: StacCatalog,
   collection: string,
-  dataset: string
+  dataset: string,
+  organization?: string
 ): ConcatenableStacItem[] {
-  // Find collection in catalog
-  const collectionObj = catalog.collections?.find(
-    (col) =>
-      col.id === collection ||
-      catalog.links.some(
-        (link) =>
-          link.rel === "child" &&
-          link?.["dclimate:id"] === collection &&
-          link.href.includes(col.id)
-      )
+  const { collection: collectionObj } = selectCollectionFromCatalog(
+    catalog,
+    collection,
+    dataset,
+    organization
   );
-
-  if (!collectionObj) {
-    throw new StacResolutionError(
-      `Collection "${collection}" not found in STAC catalog`
-    );
-  }
 
   // Find all items matching the dataset pattern
   const matchingItems: ConcatenableStacItem[] = [];
@@ -471,15 +662,8 @@ export function listAvailableDatasetsFromStac(
   for (const collection of catalog.collections || []) {
 
     // Find collection link to get dclimate metadata
-    const collectionLink = catalog.links.find(
-      (link) =>
-        link.rel === "child" &&
-        (link?.["dclimate:id"] === collection.id ||
-          link.href.includes(collection.id))
-    );
-
-    const collectionId =
-      collectionLink?.["dclimate:id"] || collection.id;
+    const collectionId = collection.id;
+    const datasetNamesFromLink = collection.datasetNames || [];
 
     // Group items by dataset
     const datasetMap = new Map<string, { dataset: string; variants: any[] }>();
@@ -510,6 +694,12 @@ export function listAvailableDatasetsFromStac(
       });
     }
 
+    for (const datasetName of datasetNamesFromLink) {
+      if (!datasetMap.has(datasetName)) {
+        datasetMap.set(datasetName, { dataset: datasetName, variants: [] });
+      }
+    }
+
     // Convert map to array
     const datasets = Array.from(datasetMap.values());
 
@@ -517,6 +707,9 @@ export function listAvailableDatasetsFromStac(
       datasetCatalog.push({
         collection: collectionId,
         datasets,
+        organization: collection.organizationId,
+        title: collection.title,
+        category: collection.category,
       });
     }
   }

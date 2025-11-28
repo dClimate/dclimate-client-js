@@ -15,7 +15,7 @@ import { normalizeSegment } from "./utils.js";
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
 import {
   loadStacCatalog,
-  resolveDatasetCidFromStac,
+  resolveDatasetFromStac,
   getConcatenableItemsFromStac,
   listAvailableDatasetsFromStac,
   type StacCatalog,
@@ -75,6 +75,16 @@ export class DClimateClient {
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
     const normalizedDatasetKey = normalizeSegment(request.dataset);
     const autoConcatenate = options.autoConcatenate;
+    let resolvedOrganization = request.organization;
+    let resolvedCollection = request.collection;
+
+    if (
+      resolvedOrganization &&
+      resolvedCollection &&
+      !resolvedCollection.startsWith(`${resolvedOrganization}_`)
+    ) {
+      resolvedCollection = `${resolvedOrganization}_${resolvedCollection}`;
+    }
 
     if (!normalizedDatasetKey) {
       throw new DatasetNotFoundError("Dataset name must be provided.");
@@ -88,15 +98,31 @@ export class DClimateClient {
       // Get all items for this collection/dataset
       const concatenableItems = getConcatenableItemsFromStac(
         catalog,
-        request.collection || "",
-        request.dataset
+        resolvedCollection || "",
+        request.dataset,
+        resolvedOrganization
       );
 
       if (concatenableItems.length > 1) {
+        const resolvedInfo = resolveDatasetFromStac(
+          catalog,
+          resolvedCollection || request.collection || "",
+          request.dataset,
+          request.variant,
+          resolvedOrganization
+        );
+        resolvedCollection = resolvedInfo.collectionId;
+        resolvedOrganization = resolvedInfo.organizationId ?? resolvedOrganization;
+
         // Multiple variants with concat metadata found
         // Load and concatenate based on dclimate:concatPriority
         return this.loadAndConcatenateVariants(
-          request,
+          {
+            ...request,
+            collection: resolvedInfo.collectionId,
+            organization: resolvedInfo.organizationId ?? resolvedOrganization,
+            variant: request.variant,
+          },
           concatenableItems,
           options
         );
@@ -110,29 +136,35 @@ export class DClimateClient {
     let cid: string;
     let resolvedPath: string;
     let metadataDataset = request.dataset;
-    let metadataCollection = request.collection;
+    let metadataCollection = resolvedCollection || request.collection;
     let metadataVariant = request.variant ?? "";
+    let metadataOrganization = resolvedOrganization;
 
     if (options.cid) {
       // Direct CID provided - bypass catalog
       cid = options.cid;
-      resolvedPath = normalizedDatasetKey;
+      const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
+      resolvedPath = pathParts.length ? pathParts.join("-") : normalizedDatasetKey;
     } else {
       // Use STAC catalog resolution
       const catalog = await this.getStacCatalog(gatewayUrl);
 
       // Resolve CID from STAC
-      cid = resolveDatasetCidFromStac(
+      const resolved = resolveDatasetFromStac(
         catalog,
-        request.collection || "",
+        resolvedCollection || request.collection || "",
         request.dataset,
-        request.variant
+        request.variant,
+        resolvedOrganization
       );
 
       // Update metadata with resolved values
-      metadataCollection = request.collection || "";
+      cid = resolved.cid;
+      metadataCollection = resolved.collectionId;
+      metadataVariant = resolved.variant || "";
+      resolvedOrganization = resolved.organizationId ?? resolvedOrganization;
+      metadataOrganization = resolved.organizationId ?? resolvedOrganization;
       metadataDataset = request.dataset;
-      metadataVariant = request.variant || "";
 
       // Build path from resolved names
       const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
@@ -147,11 +179,16 @@ export class DClimateClient {
       dataset: metadataDataset,
       collection: metadataCollection,
       variant: metadataVariant,
+      organization: metadataOrganization,
       path: resolvedPath,
       cid: cid,
       source: options.cid ? "direct_cid" : "stac",
       fetchedAt: new Date(),
     };
+
+    if (!metadata.organization && metadata.collection?.includes("_")) {
+      metadata.organization = metadata.collection.split("_")[0];
+    }
 
     if (options.returnJaxrayDataset) {
       return [dataset, metadata];
@@ -210,6 +247,7 @@ export class DClimateClient {
     const metadata: DatasetMetadata = {
       dataset: request.dataset,
       collection: request.collection,
+      organization: request.organization,
       concatenatedVariants: concatVariants.map((v) => v.variant),
       path: pathParts.join("-"),
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",

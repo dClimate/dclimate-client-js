@@ -80,8 +80,9 @@ For datasets with multiple variants (e.g., ERA5 with "finalized" and "non-finali
 // Automatically loads and concatenates finalized + non-finalized variants
 const [dataset, metadata] = await client.loadDataset({
   request: {
+    organization: "ecmwf",
     collection: "era5",
-    dataset: "2m_temperature"
+    dataset: "temperature_2m"
     // No variant specified - triggers auto-concatenation if possible
   }
 });
@@ -109,8 +110,9 @@ To load a specific variant without concatenation:
 // Load only finalized data
 const [finalized, metadata] = await client.loadDataset({
   request: {
+    organization: "ecmwf",
     collection: "era5",
-    dataset: "2m_temperature",
+    dataset: "temperature_2m",
     variant: "finalized"  // Specific variant - no concatenation
   }
 });
@@ -122,9 +124,10 @@ const [finalized, metadata] = await client.loadDataset({
 ```typescript
 const [subset, metadata] = await client.selectDataset({
   request: {
-    collection: "aifs",
-    dataset: "temperature",
-    variant: "ensemble"
+    organization: "ecmwf",
+    collection: "era5",
+    dataset: "temperature_2m",
+    variant: "finalized"
   },
   selection: {
     point: { latitude: 40.75, longitude: -73.99 },
