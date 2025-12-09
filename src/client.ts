@@ -73,6 +73,35 @@ export class DClimateClient {
   }): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
+
+
+    if (request.cid) {
+      // Direct CID provided - bypass catalog
+      const dataset = await openDatasetFromCid(request.cid, {
+        gatewayUrl,
+        ipfsElements,
+      });
+
+      const metadata: DatasetMetadata = {
+        dataset: "",
+        collection: "",
+        variant: "",
+        organization: "",
+        source: "direct_cid",
+        path: "",
+        cid: request.cid,
+        fetchedAt: new Date(),
+      };
+    if (options.returnJaxrayDataset) {
+      return [dataset, metadata];
+    }
+
+    return [new GeoTemporalDataset(dataset, metadata), metadata];
+    }
+    if (!request.dataset) {
+      throw new DatasetNotFoundError("Dataset name must be provided.");
+    }
+
     const normalizedDatasetKey = normalizeSegment(request.dataset);
     const autoConcatenate = options.autoConcatenate;
     let resolvedOrganization = request.organization;
@@ -90,8 +119,8 @@ export class DClimateClient {
       throw new DatasetNotFoundError("Dataset name must be provided.");
     }
 
-    // Skip auto-concatenation if explicit CID or variant is provided
-    if (!options.cid && !request.variant && autoConcatenate) {
+    // Skip auto-concatenation if variant is provided
+    if (!request.variant && autoConcatenate) {
       // Load STAC catalog to check for concatenable variants
       const catalog = await this.getStacCatalog(gatewayUrl);
 
@@ -140,36 +169,31 @@ export class DClimateClient {
     let metadataVariant = request.variant ?? "";
     let metadataOrganization = resolvedOrganization;
 
-    if (options.cid) {
-      // Direct CID provided - bypass catalog
-      cid = options.cid;
-      const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
-      resolvedPath = pathParts.length ? pathParts.join("-") : normalizedDatasetKey;
-    } else {
-      // Use STAC catalog resolution
-      const catalog = await this.getStacCatalog(gatewayUrl);
 
-      // Resolve CID from STAC
-      const resolved = resolveDatasetFromStac(
-        catalog,
-        resolvedCollection || request.collection || "",
-        request.dataset,
-        request.variant,
-        resolvedOrganization
-      );
+    // Use STAC catalog resolution
+    const catalog = await this.getStacCatalog(gatewayUrl);
 
-      // Update metadata with resolved values
-      cid = resolved.cid;
-      metadataCollection = resolved.collectionId;
-      metadataVariant = resolved.variant || "";
-      resolvedOrganization = resolved.organizationId ?? resolvedOrganization;
-      metadataOrganization = resolved.organizationId ?? resolvedOrganization;
-      metadataDataset = request.dataset;
+    // Resolve CID from STAC
+    const resolved = resolveDatasetFromStac(
+      catalog,
+      resolvedCollection || request.collection || "",
+      request.dataset,
+      request.variant,
+      resolvedOrganization
+    );
 
-      // Build path from resolved names
-      const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
-      resolvedPath = pathParts.join("-");
-    }
+    // Update metadata with resolved values
+    cid = resolved.cid;
+    metadataCollection = resolved.collectionId;
+    metadataVariant = resolved.variant || "";
+    resolvedOrganization = resolved.organizationId ?? resolvedOrganization;
+    metadataOrganization = resolved.organizationId ?? resolvedOrganization;
+    metadataDataset = request.dataset;
+
+    // Build path from resolved names
+    const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
+    resolvedPath = pathParts.join("-");
+    
     const dataset = await openDatasetFromCid(cid, {
       gatewayUrl,
       ipfsElements,
@@ -182,7 +206,7 @@ export class DClimateClient {
       organization: metadataOrganization,
       path: resolvedPath,
       cid: cid,
-      source: options.cid ? "direct_cid" : "stac",
+      source: "stac",
       fetchedAt: new Date(),
     };
 
@@ -220,6 +244,9 @@ export class DClimateClient {
     concatVariants: ConcatenableStacItem[],
     options: LoadDatasetOptions
   ): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
+    if (!request.dataset) {
+      throw new DatasetNotFoundError("Dataset name must be provided.");
+    }
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
 

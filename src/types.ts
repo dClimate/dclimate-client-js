@@ -8,7 +8,6 @@ export interface ClientOptions {
 }
 
 export interface LoadDatasetOptions {
-  cid?: string;
   gatewayUrl?: string;
   ipfsElements?: IpfsElements;
   returnJaxrayDataset?: boolean;
@@ -59,8 +58,9 @@ export interface DatasetMetadata {
 }
 
 export interface DatasetRequest {
-  dataset: string;
+  dataset?: string;
   collection?: string;
   variant?: string;
   organization?: string;
+  cid?: string;
 }

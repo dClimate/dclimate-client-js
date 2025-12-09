@@ -169,7 +169,7 @@ describe("Dataset metadata", () => {
       request: {
         collection: "era5",
         organization: "ecmwf",
-        dataset: "precipitation_total_land",
+        dataset: "precipitation_total",
       },
     }) as [GeoTemporalDataset, DatasetMetadata];
 

@@ -70,7 +70,7 @@ describe("loadDataset CID resolution", () => {
         request: {
           collection: "era5",
           organization: "ecmwf",
-          dataset: "precipitation_total_land",
+          dataset: "precipitation_total",
         },
       });
 
@@ -79,7 +79,7 @@ describe("loadDataset CID resolution", () => {
       }
 
       expect(dataset.info.collection).toBe("ecmwf_era5");
-      expect(dataset.info.dataset).toBe("precipitation_total_land");
+      expect(dataset.info.dataset).toBe("precipitation_total");
       expect(dataset.info.variant).toBeDefined();
       expect(openDatasetFromCidMock).toHaveBeenCalled();
     });
@@ -134,8 +134,7 @@ describe("loadDataset CID resolution", () => {
     it("bypasses catalog resolution", async () => {
       const client = new DClimateClient();
       await client.loadDataset({
-        request: { dataset: "custom" },
-        options: { cid: "bafydirect" },
+        request: { cid: "bafydirect" },
       });
 
       expect(openDatasetFromCidMock).toHaveBeenCalledWith(
@@ -147,8 +146,7 @@ describe("loadDataset CID resolution", () => {
     it("sets source to direct_cid in metadata", async () => {
       const client = new DClimateClient();
       const [dataset] = await client.loadDataset({
-        request: { dataset: "custom" },
-        options: { cid: "bafydirect" },
+        request: { cid: "bafydirect" },
       });
 
       if (dataset instanceof Dataset) {
