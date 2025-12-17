@@ -5,6 +5,12 @@ export type IpfsElements = IPFSELEMENTS_INTERFACE;
 export interface ClientOptions {
   gatewayUrl?: string;
   ipfsElements?: IpfsElements;
+  /**
+   * STAC server URL for fast CID resolution.
+   * If provided, the client will try this server first before falling back to IPFS catalog.
+   * Default: "http://localhost:8081"
+   */
+  stacServerUrl?: string | null;
 }
 
 export interface LoadDatasetOptions {

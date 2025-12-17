@@ -22,9 +22,14 @@ import {
   type ConcatenableStacItem,
 } from "./stac/index.js";
 import { DatasetCatalog } from "./stac/stac-catalog.js";
+import {
+  resolveCidFromStacServer,
+  DEFAULT_STAC_SERVER_URL,
+} from "./stac/stac-server.js";
 
 export class DClimateClient {
   private gatewayUrl: string;
+  private stacServerUrl: string | null;
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
   private clientIpfsElements?: IpfsElements;
@@ -35,6 +40,11 @@ export class DClimateClient {
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
     this.clientIpfsElements = options.ipfsElements;
+    // stacServerUrl: use provided value, or default if undefined, or null to disable
+    this.stacServerUrl =
+      options.stacServerUrl === null
+        ? null
+        : options.stacServerUrl ?? DEFAULT_STAC_SERVER_URL;
   }
 
   private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
@@ -162,33 +172,51 @@ export class DClimateClient {
     }
 
     // Fall back to single variant loading
-    let cid: string;
+    let cid: string | null = null;
     let resolvedPath: string;
     let metadataDataset = request.dataset;
     let metadataCollection = resolvedCollection || request.collection;
     let metadataVariant = request.variant ?? "";
     let metadataOrganization = resolvedOrganization;
 
+    // Try STAC server first (faster, avoids loading IPFS catalog)
+    if (this.stacServerUrl && resolvedCollection) {
+      try {
+        const serverResolved = await resolveCidFromStacServer(
+          resolvedCollection,
+          request.dataset,
+          request.variant,
+          this.stacServerUrl
+        );
+        cid = serverResolved.cid;
+        metadataCollection = serverResolved.collectionId;
+        metadataVariant = serverResolved.variant || "";
+        metadataDataset = serverResolved.dataset;
+      } catch {
+        // Fall back to IPFS catalog
+      }
+    }
 
-    // Use STAC catalog resolution
-    const catalog = await this.getStacCatalog(gatewayUrl);
+    // Fallback: Use STAC catalog resolution from IPFS
+    if (!cid) {
+      const catalog = await this.getStacCatalog(gatewayUrl);
 
-    // Resolve CID from STAC
-    const resolved = resolveDatasetFromStac(
-      catalog,
-      resolvedCollection || request.collection || "",
-      request.dataset,
-      request.variant,
-      resolvedOrganization
-    );
+      const resolved = resolveDatasetFromStac(
+        catalog,
+        resolvedCollection || request.collection || "",
+        request.dataset,
+        request.variant,
+        resolvedOrganization
+      );
 
-    // Update metadata with resolved values
-    cid = resolved.cid;
-    metadataCollection = resolved.collectionId;
-    metadataVariant = resolved.variant || "";
-    resolvedOrganization = resolved.organizationId ?? resolvedOrganization;
-    metadataOrganization = resolved.organizationId ?? resolvedOrganization;
-    metadataDataset = request.dataset;
+      // Update metadata with resolved values
+      cid = resolved.cid;
+      metadataCollection = resolved.collectionId;
+      metadataVariant = resolved.variant || "";
+      resolvedOrganization = resolved.organizationId ?? resolvedOrganization;
+      metadataOrganization = resolved.organizationId ?? resolvedOrganization;
+      metadataDataset = request.dataset;
+    }
 
     // Build path from resolved names
     const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
