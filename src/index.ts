@@ -26,3 +26,18 @@ export {
   StacLoadError,
   StacResolutionError,
 } from "./stac/index.js";
+export {
+  SirenClient,
+  createEip1193Signer,
+  type Eip1193Provider,
+  type EvmSigner,
+  type SirenApiKeyAuth,
+  type SirenX402Auth,
+  type SirenAuth,
+  type SirenOptions,
+  type SirenMetricQuery,
+  type SirenMetricDataPoint,
+  type SirenCountry,
+  type SirenRegion,
+  type SirenRegionsResponse,
+} from "./siren/index.js";

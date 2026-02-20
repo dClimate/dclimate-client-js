@@ -51,6 +51,22 @@
   "dependencies": {
     "@dclimate/jaxray": "^0.5.5"
   },
+  "peerDependencies": {
+    "@x402/core": "^1.0.0",
+    "@x402/fetch": "^1.0.0",
+    "@x402/evm": "^1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@x402/core": {
+      "optional": true
+    },
+    "@x402/fetch": {
+      "optional": true
+    },
+    "@x402/evm": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "typescript": "^5.4.0",
     "vitest": "^3.2.4"
