@@ -2,7 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DClimateClient } from "../src/index.js";
 import { SirenClient } from "../src/siren/siren-client.js";
 import { createEip1193Signer } from "../src/siren/helpers.js";
-import { SirenApiError, X402NotInstalledError } from "../src/errors.js";
+import {
+  SirenApiError,
+  SirenNotConfiguredError,
+  X402NotInstalledError,
+} from "../src/errors.js";
 import type { SirenRegionsResponse } from "../src/siren/types.js";
 
 const MOCK_REGIONS_RESPONSE: SirenRegionsResponse = {
@@ -32,6 +36,14 @@ const MOCK_METRIC_DATA = [
   { date: "2025-01-02", value: 13.1 },
   { date: "2025-01-03", value: 11.8 },
 ];
+
+const MOCK_METRIC_DATA_OBJECT = {
+  average_precip: {
+    "2025-01-01": 12.5,
+    "2025-01-02": 13.1,
+    "2025-01-03": 11.8,
+  },
+};
 
 describe("SirenClient", () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
@@ -154,6 +166,46 @@ describe("SirenClient", () => {
 
       const [url] = fetchSpy.mock.calls[0];
       expect(url).toMatch(/^https:\/\/custom-siren\.example\.com\/api/);
+    });
+
+    it("parses object metric responses using the requested metric key", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => MOCK_METRIC_DATA_OBJECT,
+      });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      const data = await client.getMetricData({
+        regionId: "region-1",
+        metric: "average_precip",
+        startDate: "2025-01-01",
+        endDate: "2025-01-03",
+      });
+
+      expect(data).toEqual(MOCK_METRIC_DATA);
+    });
+
+    it("throws when object metric response does not include requested metric", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ different_metric: { "2025-01-01": 1 } }),
+      });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      await expect(
+        client.getMetricData({
+          regionId: "region-1",
+          metric: "average_precip",
+          startDate: "2025-01-01",
+          endDate: "2025-01-03",
+        })
+      ).rejects.toThrow(/missing requested metric/i);
     });
   });
 
@@ -285,12 +337,12 @@ describe("SirenClient", () => {
           startDate: "2025-01-01",
           endDate: "2025-01-03",
         })
-      ).rejects.toThrow(/Siren is not configured/);
+      ).rejects.toThrow(SirenNotConfiguredError);
     });
 
     it("throws when calling listRegions without siren configured", async () => {
       const client = new DClimateClient();
-      await expect(client.listRegions()).rejects.toThrow(/Siren is not configured/);
+      await expect(client.listRegions()).rejects.toThrow(SirenNotConfiguredError);
     });
   });
 });
@@ -392,5 +444,41 @@ describe("createEip1193Signer", () => {
     const signer = createEip1193Signer(mockProvider);
 
     expect(() => signer.address).toThrow(/not yet available/);
+  });
+
+  it("encodes readContract eth_call data for common ERC-20 selectors", async () => {
+    const mockProvider = {
+      request: vi.fn(async (args: { method: string }) => {
+        if (args.method === "eth_call") return "0x01";
+        throw new Error(`Unexpected method: ${args.method}`);
+      }),
+    };
+
+    const signer = createEip1193Signer(mockProvider);
+    const result = await signer.readContract({
+      address: "0x1111111111111111111111111111111111111111",
+      abi: [
+        {
+          type: "function",
+          name: "balanceOf",
+          inputs: [{ type: "address" }],
+        },
+      ],
+      functionName: "balanceOf",
+      args: ["0x2222222222222222222222222222222222222222"],
+    });
+
+    expect(result).toBe("0x01");
+    expect(mockProvider.request).toHaveBeenCalledWith({
+      method: "eth_call",
+      params: [
+        {
+          to: "0x1111111111111111111111111111111111111111",
+          data:
+            "0x70a082310000000000000000000000002222222222222222222222222222222222222222",
+        },
+        "latest",
+      ],
+    });
   });
 });

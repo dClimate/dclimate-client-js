@@ -9,7 +9,7 @@ import {
 } from "./types.js";
 import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
-import { DatasetNotFoundError } from "./errors.js";
+import { DatasetNotFoundError, SirenNotConfiguredError } from "./errors.js";
 import { normalizeSegment } from "./utils.js";
 
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
@@ -84,7 +84,7 @@ export class DClimateClient {
    */
   async getMetricData(query: SirenMetricQuery): Promise<SirenMetricDataPoint[]> {
     if (!this.sirenClient) {
-      throw new DatasetNotFoundError(
+      throw new SirenNotConfiguredError(
         "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
       );
     }
@@ -98,7 +98,7 @@ export class DClimateClient {
    */
   async listRegions(): Promise<SirenRegion[]> {
     if (!this.sirenClient) {
-      throw new DatasetNotFoundError(
+      throw new SirenNotConfiguredError(
         "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
       );
     }

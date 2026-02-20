@@ -72,6 +72,34 @@ const slice = await point.timeRange({
 console.log(await slice.toRecords("precipitation"));
 ```
 
+### Siren REST API usage
+
+Use Siren methods by configuring `siren` in the client options.
+
+```typescript
+import { DClimateClient } from "@dclimate/dclimate-client-js";
+
+const client = new DClimateClient({
+  siren: {
+    auth: { type: "apiKey" }, // reads SIREN_API_KEY + SIREN_ACCOUNT_ID from env when omitted
+  },
+});
+
+const regions = await client.listRegions();
+const data = await client.getMetricData({
+  regionId: regions[0].id,
+  metric: "average_precip",
+  startDate: "2025-01-01",
+  endDate: "2025-01-31",
+});
+```
+
+For x402 auth, install optional peer dependencies:
+
+```bash
+npm install @x402/core @x402/fetch @x402/evm
+```
+
 ### Automatic variant concatenation
 
 For datasets with multiple variants (e.g., ERA5 with "finalized" and "non-finalized" data), the client automatically merges them into a complete time series when no specific variant is requested:

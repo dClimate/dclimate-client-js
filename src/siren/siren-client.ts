@@ -18,22 +18,74 @@ import type {
  * The API returns: `{ "metric_name": { "2026-01-01": 0.5, "2026-01-02": 1.2, ... } }`
  * We flatten this into an array of `{ date, value }` objects.
  */
+function parseMetricListItem(item: unknown): SirenMetricDataPoint {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    throw new SirenApiError("Unexpected Siren metric list format: items must be objects.");
+  }
+
+  const record = item as Record<string, unknown>;
+  if (typeof record.date !== "string") {
+    throw new SirenApiError(
+      "Unexpected Siren metric list format: each item must include a string 'date'."
+    );
+  }
+
+  const numericValue = Number(record.value);
+  if (!Number.isFinite(numericValue)) {
+    throw new SirenApiError(
+      "Unexpected Siren metric list format: each item must include a numeric 'value'."
+    );
+  }
+
+  return {
+    ...record,
+    date: record.date,
+    value: numericValue,
+  };
+}
+
 function parseMetricResponse(
   body: unknown,
   metric: string
 ): SirenMetricDataPoint[] {
-  if (Array.isArray(body)) return body;
-  if (!body || typeof body !== "object") return [];
+  if (Array.isArray(body)) return body.map(parseMetricListItem);
+  if (!body || typeof body !== "object") {
+    throw new SirenApiError(
+      "Unexpected Siren metric response format: expected an object or array."
+    );
+  }
 
   const record = body as Record<string, unknown>;
-  // Try the exact metric key first, then fall back to the first key
-  const timeSeries = (record[metric] ?? Object.values(record)[0]) as
-    | Record<string, number>
-    | undefined;
+  if (!(metric in record)) {
+    const availableMetrics = Object.keys(record);
+    if (availableMetrics.length > 0) {
+      const preview = availableMetrics.slice(0, 5).join(", ");
+      const suffix = availableMetrics.length > 5 ? ", ..." : "";
+      throw new SirenApiError(
+        `Siren API response missing requested metric '${metric}'. Available metrics: ${preview}${suffix}.`
+      );
+    }
+    throw new SirenApiError(
+      `Siren API response missing requested metric '${metric}' and returned no metrics.`
+    );
+  }
 
-  if (!timeSeries || typeof timeSeries !== "object") return [];
+  const timeSeries = record[metric];
+  if (!timeSeries || typeof timeSeries !== "object" || Array.isArray(timeSeries)) {
+    throw new SirenApiError(
+      `Unexpected Siren metric response format for '${metric}': expected an object keyed by date.`
+    );
+  }
 
-  return Object.entries(timeSeries).map(([date, value]) => ({ date, value }));
+  return Object.entries(timeSeries).map(([date, value]) => {
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue)) {
+      throw new SirenApiError(
+        `Unexpected Siren metric value type for date '${date}': expected numeric value.`
+      );
+    }
+    return { date, value: numericValue };
+  });
 }
 
 function formatDate(date: string | Date): string {
