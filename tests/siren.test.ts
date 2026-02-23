@@ -5,9 +5,9 @@ import { createEip1193Signer } from "../src/siren/helpers.js";
 import {
   SirenApiError,
   SirenNotConfiguredError,
-  X402NotInstalledError,
 } from "../src/errors.js";
 import type { SirenRegionsResponse } from "../src/siren/types.js";
+import { encodePaymentRequiredHeader } from "@x402/core/http";
 
 const MOCK_REGIONS_RESPONSE: SirenRegionsResponse = {
   items: [
@@ -281,7 +281,7 @@ describe("SirenClient", () => {
   });
 
   describe("x402 auth", () => {
-    it("throws X402NotInstalledError when @x402 packages are not available", async () => {
+    it("rejects invalid maxUsdCents values", async () => {
       const mockSigner = {
         address: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
         signTypedData: vi.fn(),
@@ -289,7 +289,51 @@ describe("SirenClient", () => {
       };
 
       const client = new SirenClient({
-        auth: { type: "x402", signer: mockSigner, network: "base" },
+        auth: { type: "x402", signer: mockSigner, network: "base", maxUsdCents: 0.5 },
+        x402BaseUrl: "https://x402-siren.example.com",
+      });
+
+      await expect(client.listRegions()).rejects.toThrow(/maxUsdCents/i);
+    });
+
+    it("blocks expensive payment requirements before signing", async () => {
+      const mockSigner = {
+        address: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
+        signTypedData: vi.fn(),
+        readContract: vi.fn(),
+      };
+
+      const paymentRequired = {
+        x402Version: 2 as const,
+        resource: {
+          url: "https://x402-siren.example.com/metric-data/region-1/average_precip/2025-01-01/2025-01-03",
+          description: "Paid metric endpoint",
+          mimeType: "application/json",
+        },
+        accepts: [
+          {
+            scheme: "exact",
+            network: "eip155:8453",
+            asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            amount: "200000", // $0.20 USDC (6 decimals)
+            payTo: "0x1234567890abcdef1234567890abcdef12345678",
+            maxTimeoutSeconds: 300,
+            extra: {},
+          },
+        ],
+      };
+
+      fetchSpy.mockResolvedValueOnce(
+        new Response(null, {
+          status: 402,
+          headers: {
+            "PAYMENT-REQUIRED": encodePaymentRequiredHeader(paymentRequired),
+          },
+        })
+      );
+
+      const client = new SirenClient({
+        auth: { type: "x402", signer: mockSigner, network: "base", maxUsdCents: 10 },
         x402BaseUrl: "https://x402-siren.example.com",
       });
 
@@ -300,7 +344,10 @@ describe("SirenClient", () => {
           startDate: "2025-01-01",
           endDate: "2025-01-03",
         })
-      ).rejects.toThrow(X402NotInstalledError);
+      ).rejects.toThrow(/exceeds configured max amount/i);
+
+      expect(mockSigner.signTypedData).not.toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalledOnce();
     });
   });
 

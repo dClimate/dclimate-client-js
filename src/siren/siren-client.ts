@@ -113,6 +113,59 @@ function getEnv(name: string): string | undefined {
   }
 }
 
+const USD_CENTS_TO_6_DECIMAL_ATOMIC = 10_000n;
+
+function parsePositiveBigInt(value: string | bigint, fieldName: string): bigint {
+  if (typeof value === "bigint") {
+    if (value <= 0n) {
+      throw new SirenApiError(`${fieldName} must be greater than 0.`);
+    }
+    return value;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw new SirenApiError(`${fieldName} must be a positive integer string.`);
+  }
+
+  const parsed = BigInt(value);
+  if (parsed <= 0n) {
+    throw new SirenApiError(`${fieldName} must be greater than 0.`);
+  }
+  return parsed;
+}
+
+function resolveMaxPaymentAmountAtomic(auth: Extract<SirenAuth, { type: "x402" }>): bigint | undefined {
+  const fromAtomic =
+    auth.maxAmountAtomic !== undefined
+      ? parsePositiveBigInt(auth.maxAmountAtomic, "auth.maxAmountAtomic")
+      : undefined;
+
+  const fromUsdCents =
+    auth.maxUsdCents !== undefined
+      ? (() => {
+          if (!Number.isInteger(auth.maxUsdCents) || auth.maxUsdCents <= 0) {
+            throw new SirenApiError("auth.maxUsdCents must be a positive integer.");
+          }
+          // Convenience conversion for 6-decimal USD stablecoins (USDC/EURC).
+          return BigInt(auth.maxUsdCents) * USD_CENTS_TO_6_DECIMAL_ATOMIC;
+        })()
+      : undefined;
+
+  if (fromAtomic !== undefined && fromUsdCents !== undefined) {
+    return fromAtomic < fromUsdCents ? fromAtomic : fromUsdCents;
+  }
+  return fromAtomic ?? fromUsdCents;
+}
+
+function getRequirementAmountAtomic(requirement: unknown): bigint | null {
+  if (!requirement || typeof requirement !== "object") return null;
+  const record = requirement as Record<string, unknown>;
+  const rawAmount = record.amount ?? record.maxAmountRequired;
+  if (typeof rawAmount !== "string") return null;
+  if (!/^\d+$/.test(rawAmount)) return null;
+  return BigInt(rawAmount);
+}
+
 export class SirenClient {
   private readonly auth: SirenAuth;
   private readonly baseUrl: string;
@@ -276,6 +329,29 @@ export class SirenClient {
     const evmSigner = toClientEvmSigner(this.auth.signer as never);
     const scheme = new ExactEvmScheme(evmSigner);
     const client = new x402ClientCtor();
+    const maxAmountAtomic = resolveMaxPaymentAmountAtomic(this.auth);
+
+    if (maxAmountAtomic !== undefined) {
+      client.registerPolicy((_x402Version, requirements) => {
+        const affordable = requirements.filter((requirement) => {
+          const amountAtomic = getRequirementAmountAtomic(requirement);
+          return amountAtomic !== null && amountAtomic <= maxAmountAtomic;
+        });
+
+        if (affordable.length === 0) {
+          const offered = requirements
+            .map((requirement) => getRequirementAmountAtomic(requirement))
+            .filter((amount): amount is bigint => amount !== null)
+            .map((amount) => amount.toString());
+          throw new X402PaymentError(
+            `x402 payment exceeds configured max amount (${maxAmountAtomic.toString()} atomic units). Offered amounts: ${offered.length > 0 ? offered.join(", ") : "unknown"}.`
+          );
+        }
+
+        return affordable;
+      });
+    }
+
     client.register(caip2, scheme);
 
     this.x402Fetch = wrapFetchWithPayment(fetch, client);

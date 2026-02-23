@@ -100,6 +100,27 @@ For x402 auth, install optional peer dependencies:
 npm install @x402/core @x402/fetch @x402/evm
 ```
 
+You can also configure a max payment cap so the client will reject expensive payment requirements before signing:
+
+```typescript
+import { DClimateClient, createEip1193Signer } from "@dclimate/dclimate-client-js";
+
+const signer = createEip1193Signer(window.ethereum);
+
+const client = new DClimateClient({
+  siren: {
+    auth: {
+      type: "x402",
+      signer,
+      network: "base",
+      maxUsdCents: 10, // never pay more than $0.10
+      // or use maxAmountAtomic: "100000" for exact token-base units
+    },
+    x402BaseUrl: "https://x402-api-siren.dclimate.net",
+  },
+});
+```
+
 ### Automatic variant concatenation
 
 For datasets with multiple variants (e.g., ERA5 with "finalized" and "non-finalized" data), the client automatically merges them into a complete time series when no specific variant is requested:

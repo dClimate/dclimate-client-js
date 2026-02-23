@@ -5,6 +5,17 @@
  */
 
 declare module "@x402/fetch" {
+  export type PaymentRequirements = {
+    amount?: string;
+    maxAmountRequired?: string;
+    [key: string]: unknown;
+  };
+
+  export type PaymentPolicy = (
+    x402Version: number,
+    paymentRequirements: PaymentRequirements[]
+  ) => PaymentRequirements[];
+
   export function wrapFetchWithPayment(
     fetchFn: typeof fetch,
     client: unknown
@@ -13,6 +24,7 @@ declare module "@x402/fetch" {
   export class x402Client {
     constructor();
     register(network: string, scheme: unknown): x402Client;
+    registerPolicy(policy: PaymentPolicy): x402Client;
   }
 
   export class x402HTTPClient {

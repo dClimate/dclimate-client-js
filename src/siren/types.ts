@@ -47,6 +47,18 @@ export interface SirenX402Auth {
   network?: string;
   /** x402 facilitator URL (uses protocol default if omitted) */
   facilitatorUrl?: string;
+  /**
+   * Optional hard cap in atomic token units.
+   * Example (USDC 6 decimals): "100000" = $0.10.
+   * If all payment options exceed this value, the request is rejected before signing.
+   */
+  maxAmountAtomic?: string | bigint;
+  /**
+   * Optional convenience cap in USD cents for 6-decimal USD stablecoins (USDC/EURC).
+   * Example: 10 means "do not pay more than $0.10".
+   * If both maxUsdCents and maxAmountAtomic are set, the stricter cap is applied.
+   */
+  maxUsdCents?: number;
 }
 
 export type SirenAuth = SirenApiKeyAuth | SirenX402Auth;

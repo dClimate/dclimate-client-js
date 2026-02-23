@@ -22,11 +22,14 @@
  *   REGION_ID          — Siren region ID to query
  *   METRIC             — Metric name (default: average_precip)
  *   NETWORK            — Payment network (default: base-sepolia)
+ *   MAX_AMOUNT_ATOMIC  — Optional hard cap in token atomic units (e.g. 100000 = $0.10 USDC)
+ *   MAX_USD_CENTS      — Optional hard cap in USD cents for 6-decimal stablecoins (e.g. 10 = $0.10)
  */
 
-import { createWalletClient, createPublicClient, http } from "viem";
+import { createPublicClient, http } from "viem";
 import { privateKeyToAccount, mnemonicToAccount } from "viem/accounts";
 import { baseSepolia, base } from "viem/chains";
+import { toClientEvmSigner } from "@x402/evm";
 import { SirenClient } from "../src/siren/index.js";
 import type { EvmSigner } from "../src/siren/types.js";
 import * as fs from "fs";
@@ -38,6 +41,8 @@ const GATEWAY_URL = process.env.GATEWAY_URL || "http://localhost:8080";
 const REGION_ID = process.env.REGION_ID || "4c59966e-8653-4534-a640-5b0e9be3de81";
 const METRIC = process.env.METRIC || "average_precip";
 const NETWORK = process.env.NETWORK || "base-sepolia";
+const MAX_AMOUNT_ATOMIC = process.env.MAX_AMOUNT_ATOMIC ? String(process.env.MAX_AMOUNT_ATOMIC) : undefined;
+const MAX_USD_CENTS = process.env.MAX_USD_CENTS ? Number(process.env.MAX_USD_CENTS) : undefined;
 
 const CHAIN_MAP: Record<string, { chain: (typeof base) | (typeof baseSepolia); rpcUrl?: string }> = {
   base: { chain: base },
@@ -96,40 +101,13 @@ function createViemSigner(network: string): EvmSigner {
     ? privateKeyToAccount(privateKey)
     : mnemonicToAccount(mnemonic!);
 
-  const walletClient = createWalletClient({
-    account,
-    chain: chainConfig.chain,
-    transport: http(),
-  });
-
   const publicClient = createPublicClient({
     chain: chainConfig.chain,
-    transport: http(),
+    transport: http(chainConfig.rpcUrl),
   });
 
-  return {
-    get address() {
-      return account.address;
-    },
-
-    async signTypedData(params) {
-      return walletClient.signTypedData({
-        domain: params.domain as Record<string, unknown>,
-        types: params.types as Record<string, unknown[]>,
-        primaryType: params.primaryType,
-        message: params.message,
-      } as Parameters<typeof walletClient.signTypedData>[0]);
-    },
-
-    async readContract(params) {
-      return publicClient.readContract({
-        address: params.address,
-        abi: params.abi,
-        functionName: params.functionName,
-        args: params.args,
-      } as never);
-    },
-  };
+  // Use x402's built-in viem adapter instead of hand-rolling an EvmSigner.
+  return toClientEvmSigner(account, publicClient) as EvmSigner;
 }
 
 // ─── Main ────────────────────────────────────────────────
@@ -140,6 +118,12 @@ async function main() {
   console.log(`Network:  ${NETWORK}`);
   console.log(`Region:   ${REGION_ID}`);
   console.log(`Metric:   ${METRIC}\n`);
+  if (MAX_AMOUNT_ATOMIC) {
+    console.log(`Max atomic payment: ${MAX_AMOUNT_ATOMIC}`);
+  }
+  if (MAX_USD_CENTS !== undefined) {
+    console.log(`Max USD payment:    ${MAX_USD_CENTS} cents`);
+  }
 
   const signer = createViemSigner(NETWORK);
   console.log(`Wallet:   ${signer.address}\n`);
@@ -149,6 +133,8 @@ async function main() {
       type: "x402",
       signer,
       network: NETWORK,
+      maxAmountAtomic: MAX_AMOUNT_ATOMIC,
+      maxUsdCents: MAX_USD_CENTS,
     },
     x402BaseUrl: `${GATEWAY_URL}/v1/siren`,
   });
@@ -172,6 +158,7 @@ async function main() {
   const endDate = new Date();
   const startDate = new Date();
   startDate.setDate(startDate.getDate() - 30); // last 30 days
+  const getMetricDataStartedAt = Date.now();
 
   try {
     const data = await client.getMetricData({
@@ -180,13 +167,17 @@ async function main() {
       startDate,
       endDate,
     });
+    const getMetricDataElapsedMs = Date.now() - getMetricDataStartedAt;
     console.log(`Received ${data.length} data points`);
+    console.log(`Request time: ${getMetricDataElapsedMs} ms (${(getMetricDataElapsedMs / 1000).toFixed(2)} s)`);
     if (data.length > 0) {
       console.log(`  First: ${data[0].date} = ${data[0].value}`);
       console.log(`  Last:  ${data[data.length - 1].date} = ${data[data.length - 1].value}`);
     }
   } catch (err) {
+    const getMetricDataElapsedMs = Date.now() - getMetricDataStartedAt;
     console.error("getMetricData failed:", (err as Error).message);
+    console.log(`Request time before failure: ${getMetricDataElapsedMs} ms (${(getMetricDataElapsedMs / 1000).toFixed(2)} s)`);
   }
 
   console.log("\n=== Done ===");
