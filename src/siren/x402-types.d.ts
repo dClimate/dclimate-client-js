@@ -9,19 +9,24 @@ declare module "@x402/fetch" {
     fetchFn: typeof fetch,
     client: unknown
   ): typeof fetch;
-}
 
-declare module "@x402/core" {
   export class x402Client {
     constructor();
-    register(network: string, client: unknown): x402Client;
+    register(network: string, scheme: unknown): x402Client;
+  }
+
+  export class x402HTTPClient {
+    constructor(client: unknown);
   }
 }
 
 declare module "@x402/evm" {
-  export function registerEvmSchemes(
-    client: unknown,
+  export class ExactEvmScheme {
+    constructor(signer: unknown);
+  }
+
+  export function toClientEvmSigner(
     signer: unknown,
-    network: string
-  ): void;
+    publicClient?: unknown
+  ): unknown;
 }

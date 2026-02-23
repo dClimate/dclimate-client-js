@@ -49,27 +49,10 @@
   },
   "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
-    "@dclimate/jaxray": "^0.5.5"
-  },
-  "peerDependencies": {
-    "@x402/core": "^1.0.0",
-    "@x402/evm": "^1.0.0",
-    "@x402/fetch": "^1.0.0",
-    "viem": "^2.0.0"
-  },
-  "peerDependenciesMeta": {
-    "@x402/core": {
-      "optional": true
-    },
-    "@x402/fetch": {
-      "optional": true
-    },
-    "@x402/evm": {
-      "optional": true
-    },
-    "viem": {
-      "optional": true
-    }
+    "@dclimate/jaxray": "^0.5.5",
+    "@x402/core": "^2.4.0",
+    "@x402/evm": "^2.4.0",
+    "@x402/fetch": "^2.4.0"
   },
   "devDependencies": {
     "typescript": "^5.4.0",

@@ -227,7 +227,6 @@ export class SirenClient {
 
   /**
    * Lazily initialize the x402-wrapped fetch function.
-   * Dynamically imports @x402/* packages so they remain optional.
    */
   private async getX402Fetch(): Promise<typeof fetch> {
     if (this.x402Fetch) return this.x402Fetch;
@@ -237,12 +236,14 @@ export class SirenClient {
     }
 
     let wrapFetchWithPayment: typeof import("@x402/fetch")["wrapFetchWithPayment"];
-    let x402Client: typeof import("@x402/core")["x402Client"];
-    let registerEvmSchemes: typeof import("@x402/evm")["registerEvmSchemes"];
+    let x402ClientCtor: typeof import("@x402/fetch")["x402Client"];
+    let ExactEvmScheme: typeof import("@x402/evm")["ExactEvmScheme"];
+    let toClientEvmSigner: typeof import("@x402/evm")["toClientEvmSigner"];
 
     try {
       const fetchMod = await import("@x402/fetch");
       wrapFetchWithPayment = fetchMod.wrapFetchWithPayment;
+      x402ClientCtor = fetchMod.x402Client;
     } catch {
       throw new X402NotInstalledError(
         "x402 auth requires @x402/fetch. Install it: npm install @x402/core @x402/fetch @x402/evm"
@@ -250,27 +251,32 @@ export class SirenClient {
     }
 
     try {
-      const coreMod = await import("@x402/core");
-      x402Client = coreMod.x402Client;
-    } catch {
-      throw new X402NotInstalledError(
-        "x402 auth requires @x402/core. Install it: npm install @x402/core @x402/fetch @x402/evm"
-      );
-    }
-
-    try {
       const evmMod = await import("@x402/evm");
-      registerEvmSchemes = evmMod.registerEvmSchemes;
+      ExactEvmScheme = evmMod.ExactEvmScheme;
+      toClientEvmSigner = evmMod.toClientEvmSigner;
     } catch {
       throw new X402NotInstalledError(
         "x402 auth requires @x402/evm. Install it: npm install @x402/core @x402/fetch @x402/evm"
       );
     }
 
-    // Build x402 client with EVM scheme registered for the signer
-    const client = new x402Client();
+    // Build x402 client with EVM scheme registered for the signer's network
+    // Map friendly network names to CAIP-2 identifiers required by x402 v2
+    const NETWORK_TO_CAIP2: Record<string, string> = {
+      base: "eip155:8453",
+      "base-sepolia": "eip155:84532",
+      ethereum: "eip155:1",
+      arbitrum: "eip155:42161",
+      optimism: "eip155:10",
+      polygon: "eip155:137",
+      avalanche: "eip155:43114",
+    };
     const network = this.auth.network ?? "base";
-    registerEvmSchemes(client, this.auth.signer, network);
+    const caip2 = NETWORK_TO_CAIP2[network] ?? network;
+    const evmSigner = toClientEvmSigner(this.auth.signer as never);
+    const scheme = new ExactEvmScheme(evmSigner);
+    const client = new x402ClientCtor();
+    client.register(caip2, scheme);
 
     this.x402Fetch = wrapFetchWithPayment(fetch, client);
     return this.x402Fetch;
