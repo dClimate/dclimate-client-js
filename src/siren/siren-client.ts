@@ -279,6 +279,23 @@ export class SirenClient {
   }
 
   /**
+   * List available metrics.
+   */
+  async listMetrics(): Promise<string[]> {
+    const url = `${this.baseUrl}/metrics`;
+    const response = await fetch(url, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) {
+      throw new SirenApiError(
+        `Siren API error (${response.status}): ${response.statusText}`
+      );
+    }
+    return response.json();
+  }
+
+  /**
    * Lazily initialize the x402-wrapped fetch function.
    */
   private async getX402Fetch(): Promise<typeof fetch> {

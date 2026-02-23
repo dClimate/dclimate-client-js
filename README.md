@@ -85,10 +85,11 @@ const client = new DClimateClient({
   },
 });
 
+const metrics = await client.listMetrics(); // returns string[] of available metric names
 const regions = await client.listRegions();
 const data = await client.getMetricData({
   regionId: regions[0].id,
-  metric: "average_precip",
+  metric: metrics[0],
   startDate: "2025-01-01",
   endDate: "2025-01-31",
 });
