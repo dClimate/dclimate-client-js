@@ -2,8 +2,10 @@
  * Siren REST API client supporting API-key and x402 payment authentication.
  */
 
+import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
+import { ExactEvmScheme, toClientEvmSigner } from "@x402/evm";
 import { DEFAULT_SIREN_API_URL } from "../constants.js";
-import { SirenApiError, X402NotInstalledError, X402PaymentError } from "../errors.js";
+import { SirenApiError, X402PaymentError } from "../errors.js";
 import type {
   SirenAuth,
   SirenMetricDataPoint,
@@ -222,7 +224,7 @@ export class SirenClient {
     }
 
     // x402 auth
-    const wrappedFetch = await this.getX402Fetch();
+    const wrappedFetch = this.getX402Fetch();
     const apiBase = this.x402BaseUrl ?? this.baseUrl;
     const url = `${apiBase}/metric-data/${query.regionId}/${query.metric}/${startDate}/${endDate}`;
     const response = await wrappedFetch(url, {
@@ -262,7 +264,7 @@ export class SirenClient {
 
     // x402 auth — listRegions is free, but we still use the x402 base URL
     // The server simply won't return 402 for this endpoint
-    const wrappedFetch = await this.getX402Fetch();
+    const wrappedFetch = this.getX402Fetch();
     const apiBase = this.x402BaseUrl ?? this.baseUrl;
     const url = `${apiBase}/regions`;
     const response = await wrappedFetch(url, {
@@ -296,42 +298,15 @@ export class SirenClient {
   }
 
   /**
-   * Lazily initialize the x402-wrapped fetch function.
+   * Initialize the x402-wrapped fetch function (cached after first call).
    */
-  private async getX402Fetch(): Promise<typeof fetch> {
+  private getX402Fetch(): typeof fetch {
     if (this.x402Fetch) return this.x402Fetch;
 
     if (this.auth.type !== "x402") {
       throw new Error("x402 fetch requested but auth is not x402");
     }
 
-    let wrapFetchWithPayment: typeof import("@x402/fetch")["wrapFetchWithPayment"];
-    let x402ClientCtor: typeof import("@x402/fetch")["x402Client"];
-    let ExactEvmScheme: typeof import("@x402/evm")["ExactEvmScheme"];
-    let toClientEvmSigner: typeof import("@x402/evm")["toClientEvmSigner"];
-
-    try {
-      const fetchMod = await import("@x402/fetch");
-      wrapFetchWithPayment = fetchMod.wrapFetchWithPayment;
-      x402ClientCtor = fetchMod.x402Client;
-    } catch {
-      throw new X402NotInstalledError(
-        "x402 auth requires @x402/fetch. Install it: npm install @x402/core @x402/fetch @x402/evm"
-      );
-    }
-
-    try {
-      const evmMod = await import("@x402/evm");
-      ExactEvmScheme = evmMod.ExactEvmScheme;
-      toClientEvmSigner = evmMod.toClientEvmSigner;
-    } catch {
-      throw new X402NotInstalledError(
-        "x402 auth requires @x402/evm. Install it: npm install @x402/core @x402/fetch @x402/evm"
-      );
-    }
-
-    // Build x402 client with EVM scheme registered for the signer's network
-    // Map friendly network names to CAIP-2 identifiers required by x402 v2
     const NETWORK_TO_CAIP2: Record<string, string> = {
       base: "eip155:8453",
       "base-sepolia": "eip155:84532",
@@ -345,7 +320,7 @@ export class SirenClient {
     const caip2 = NETWORK_TO_CAIP2[network] ?? network;
     const evmSigner = toClientEvmSigner(this.auth.signer as never);
     const scheme = new ExactEvmScheme(evmSigner);
-    const client = new x402ClientCtor();
+    const client = new x402Client();
     const maxAmountAtomic = resolveMaxPaymentAmountAtomic(this.auth);
 
     if (maxAmountAtomic !== undefined) {
