@@ -72,6 +72,56 @@ const slice = await point.timeRange({
 console.log(await slice.toRecords("precipitation"));
 ```
 
+### Siren REST API usage
+
+Use Siren methods by configuring `siren` in the client options.
+
+```typescript
+import { DClimateClient } from "@dclimate/dclimate-client-js";
+
+const client = new DClimateClient({
+  siren: {
+    auth: { type: "apiKey" }, // reads SIREN_API_KEY + SIREN_ACCOUNT_ID from env when omitted
+  },
+});
+
+const metrics = await client.listMetrics(); // returns string[] of available metric names
+const regions = await client.listRegions();
+const data = await client.getMetricData({
+  regionId: regions[0].id,
+  metric: metrics[0],
+  startDate: "2025-01-01",
+  endDate: "2025-01-31",
+});
+```
+
+For x402 auth, install optional peer dependencies:
+
+```bash
+npm install @x402/core @x402/fetch @x402/evm
+```
+
+You can also configure a max payment cap so the client will reject expensive payment requirements before signing:
+
+```typescript
+import { DClimateClient, createEip1193Signer } from "@dclimate/dclimate-client-js";
+
+const signer = createEip1193Signer(window.ethereum);
+
+const client = new DClimateClient({
+  siren: {
+    auth: {
+      type: "x402",
+      signer,
+      network: "base",
+      maxUsdCents: 10, // never pay more than $0.10
+      // or use maxAmountAtomic: "100000" for exact token-base units
+    },
+    x402BaseUrl: "https://x402-api-siren.dclimate.net",
+  },
+});
+```
+
 ### Automatic variant concatenation
 
 For datasets with multiple variants (e.g., ERA5 with "finalized" and "non-finalized" data), the client automatically merges them into a complete time series when no specific variant is requested:

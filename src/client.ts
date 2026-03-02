@@ -9,7 +9,7 @@ import {
 } from "./types.js";
 import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
-import { DatasetNotFoundError } from "./errors.js";
+import { DatasetNotFoundError, SirenNotConfiguredError } from "./errors.js";
 import { normalizeSegment } from "./utils.js";
 
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
@@ -26,6 +26,8 @@ import {
   resolveCidFromStacServer,
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
+import { SirenClient } from "./siren/siren-client.js";
+import type { SirenMetricQuery, SirenMetricDataPoint, SirenRegion } from "./siren/types.js";
 
 export class DClimateClient {
   private gatewayUrl: string;
@@ -36,6 +38,7 @@ export class DClimateClient {
   private stacCatalog?: StacCatalog;
   private stacCatalogTimestamp?: number;
   private stacCacheTtl: number = 3600000; // 1 hour
+  private sirenClient?: SirenClient;
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
@@ -45,6 +48,10 @@ export class DClimateClient {
       options.stacServerUrl === null
         ? null
         : options.stacServerUrl ?? DEFAULT_STAC_SERVER_URL;
+
+    if (options.siren) {
+      this.sirenClient = new SirenClient(options.siren);
+    }
   }
 
   private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
@@ -69,6 +76,33 @@ export class DClimateClient {
 
   async listCatalogEntries(): Promise<DatasetCatalog> {
     return this.listAvailableDatasets();
+  }
+
+  /**
+   * Fetch metric data for a Siren region over a date range.
+   * Requires `siren` to be configured in ClientOptions.
+   */
+  async getMetricData(query: SirenMetricQuery): Promise<SirenMetricDataPoint[]> {
+    if (!this.sirenClient) {
+      throw new SirenNotConfiguredError(
+        "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
+      );
+    }
+    return this.sirenClient.getMetricData(query);
+  }
+
+  /**
+   * List available Siren regions.
+   * Requires `siren` to be configured in ClientOptions.
+   * This is a free endpoint — no x402 payment required.
+   */
+  async listRegions(): Promise<SirenRegion[]> {
+    if (!this.sirenClient) {
+      throw new SirenNotConfiguredError(
+        "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
+      );
+    }
+    return this.sirenClient.listRegions();
   }
 
   async loadDataset({

@@ -1,4 +1,5 @@
 import type { IPFSELEMENTS_INTERFACE } from "@dclimate/jaxray";
+import type { SirenOptions } from "./siren/types.js";
 
 export type IpfsElements = IPFSELEMENTS_INTERFACE;
 
@@ -11,6 +12,12 @@ export interface ClientOptions {
    * Default: "http://localhost:8081"
    */
   stacServerUrl?: string | null;
+  /**
+   * Siren REST API configuration.
+   * Enables getMetricData() and listRegions() methods on the client.
+   * Supports API key auth or x402 pay-per-request auth.
+   */
+  siren?: SirenOptions;
 }
 
 export interface LoadDatasetOptions {
