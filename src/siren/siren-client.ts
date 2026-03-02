@@ -317,7 +317,7 @@ export class SirenClient {
       avalanche: "eip155:43114",
     };
     const network = this.auth.network ?? "base";
-    const caip2 = NETWORK_TO_CAIP2[network] ?? network;
+    const caip2 = (NETWORK_TO_CAIP2[network] ?? network) as `${string}:${string}`;
     const evmSigner = toClientEvmSigner(this.auth.signer as never);
     const scheme = new ExactEvmScheme(evmSigner);
     const client = new x402Client();
