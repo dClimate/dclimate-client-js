@@ -22,6 +22,8 @@ export {
   type ConcatenableStacItem,
   type ResolvedDatasetFromStac,
   type StacOrganization,
+  type SpatialExtent,
+  type TemporalExtent,
   StacCatalogError,
   StacLoadError,
   StacResolutionError,

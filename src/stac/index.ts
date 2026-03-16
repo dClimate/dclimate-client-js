@@ -15,6 +15,8 @@ export {
   type ConcatenableStacItem,
   type ResolvedDatasetFromStac,
   type StacOrganization,
+  type SpatialExtent,
+  type TemporalExtent,
 } from "./stac-catalog.js";
 
 export {

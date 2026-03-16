@@ -49,11 +49,11 @@
   },
   "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
-    "@dclimate/jaxray": "^0.5.5"
+    "@dclimate/jaxray": "^0.6.8"
   },
   "devDependencies": {
     "typescript": "^5.4.0",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.0"
   },
   "publishConfig": {
     "access": "public"

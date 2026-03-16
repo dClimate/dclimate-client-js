@@ -27,6 +27,15 @@ export class StacResolutionError extends StacCatalogError {
 // STAC Interfaces
 // ============================================================================
 
+export interface SpatialExtent {
+  bbox: [number, number, number, number]; // [minLon, minLat, maxLon, maxLat]
+}
+
+export interface TemporalExtent {
+  start: string | null;
+  end: string | null;
+}
+
 export interface DatasetVariantConfig {
   variant: string;
   cid?: string;
@@ -42,6 +51,8 @@ export interface DatasetVariantConfig {
    * Only used when concatPriority is defined.
    */
   concatDimension?: string;
+  spatialExtent?: SpatialExtent;
+  temporalExtent?: TemporalExtent;
 }
 
 export interface CatalogDataset {
@@ -688,10 +699,28 @@ export function listAvailableDatasetsFromStac(
         });
       }
 
-      datasetMap.get(itemDataset)!.variants.push({
+      const variantEntry: DatasetVariantConfig = {
         variant: itemVariant,
         cid,
-      });
+      };
+
+      const bbox = item.bbox;
+      if (Array.isArray(bbox) && bbox.length >= 4) {
+        variantEntry.spatialExtent = {
+          bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
+        };
+      }
+
+      const startDt = item.properties?.start_datetime ?? item.properties?.datetime ?? null;
+      const endDt = item.properties?.end_datetime ?? item.properties?.datetime ?? null;
+      if (startDt != null || endDt != null) {
+        variantEntry.temporalExtent = {
+          start: startDt ?? null,
+          end: endDt ?? null,
+        };
+      }
+
+      datasetMap.get(itemDataset)!.variants.push(variantEntry);
     }
 
     for (const datasetName of datasetNamesFromLink) {
