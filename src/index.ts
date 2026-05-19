@@ -13,6 +13,7 @@ export {
   resolveDatasetFromStac,
   getConcatenableItemsFromStac,
   listAvailableDatasetsFromStac,
+  listAvailableDatasetsFromStacServer,
   getRootCatalogCid,
   resolveIpfsUri,
   type StacCatalog,

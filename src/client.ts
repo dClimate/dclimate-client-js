@@ -24,6 +24,7 @@ import {
 import { DatasetCatalog } from "./stac/stac-catalog.js";
 import {
   resolveCidFromStacServer,
+  listAvailableDatasetsFromStacServer,
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 
@@ -63,6 +64,16 @@ export class DClimateClient {
   }
 
   async listAvailableDatasets(): Promise<DatasetCatalog> {
+    // STAC API first — single-digit HTTP calls vs. hundreds of serial IPFS
+    // gateway round-trips. Falls through to the IPFS walk only if the server
+    // is unavailable or misconfigured. Mirrors the resolve-CID pattern below.
+    if (this.stacServerUrl) {
+      try {
+        return await listAvailableDatasetsFromStacServer(this.stacServerUrl);
+      } catch {
+        // Fall through to IPFS catalog.
+      }
+    }
     const catalog = await this.getStacCatalog(this.gatewayUrl);
     return listAvailableDatasetsFromStac(catalog);
   }

@@ -28,6 +28,7 @@ export {
 export {
   resolveCidFromStacServer,
   resolveDatasetCidFromStacServer,
+  listAvailableDatasetsFromStacServer,
   DEFAULT_STAC_SERVER_URL,
   type StacServerSearchResponse,
   type StacServerItem,

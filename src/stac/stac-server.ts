@@ -5,6 +5,13 @@
  * which is faster than traversing the IPFS-hosted catalog structure.
  */
 
+import type {
+  CatalogCollection,
+  CatalogDataset,
+  DatasetCatalog,
+  DatasetVariantConfig,
+} from "./stac-catalog.js";
+
 export const DEFAULT_STAC_SERVER_URL = "https://api.stac.dclimate.net";
 
 export interface StacServerSearchResponse {
@@ -139,4 +146,183 @@ export async function resolveDatasetCidFromStacServer(
     serverUrl
   );
   return result.cid;
+}
+
+interface StacServerCollectionsResponse {
+  collections: Array<{
+    id: string;
+    title?: string;
+    extent?: unknown;
+  }>;
+}
+
+interface StacServerSearchFeature {
+  id: string;
+  collection?: string;
+  bbox?: number[];
+  properties: Record<string, any>;
+}
+
+interface StacServerSearchPage {
+  features: StacServerSearchFeature[];
+}
+
+function stripIpfsScheme(cid: string | undefined): string | undefined {
+  if (!cid) return undefined;
+  return cid.startsWith("ipfs://") ? cid.replace(/^ipfs:\/\//, "") : cid;
+}
+
+/**
+ * List all datasets/variants by querying a STAC API server directly.
+ *
+ * This is the fast path that mirrors `listAvailableDatasetsFromStac` (the IPFS
+ * walker) without traversing the IPFS-hosted catalog tree. Two requests:
+ *   1. GET  /collections  — collection ids, titles
+ *   2. POST /search       — items, with dataset/variant/CID in properties
+ *
+ * Returns the same {@link DatasetCatalog} shape as the IPFS walker so callers
+ * don't need to know which path produced it.
+ *
+ * Notes:
+ *   - Organization is derived from the `{org}_{name}` collection-id convention
+ *     (e.g. `noaa_aigfs` → org=`noaa`). The IPFS walker reads it from a
+ *     `dclimate:id` field on an org-level link; the STAC API doesn't expose
+ *     organizations as first-class entities.
+ *   - Category (historical/forecast) isn't populated here — the IPFS walker
+ *     pulls it from `dclimate:collections:<category>` on the org link, which
+ *     has no STAC API equivalent.
+ *   - The fixed `limit: 1000` covers today's catalog (~45 items) by a wide
+ *     margin. If the catalog grows past that, switch to following the
+ *     STAC `next` link instead of a single request.
+ */
+export async function listAvailableDatasetsFromStacServer(
+  serverUrl: string = DEFAULT_STAC_SERVER_URL
+): Promise<DatasetCatalog> {
+  const [collectionsResp, searchResp] = await Promise.all([
+    fetch(`${serverUrl}/collections`),
+    fetch(`${serverUrl}/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 1000 }),
+    }),
+  ]);
+
+  if (!collectionsResp.ok) {
+    const text = await collectionsResp.text();
+    throw new Error(
+      `STAC server /collections error ${collectionsResp.status}: ${text}`
+    );
+  }
+  if (!searchResp.ok) {
+    const text = await searchResp.text();
+    throw new Error(
+      `STAC server /search error ${searchResp.status}: ${text}`
+    );
+  }
+
+  const collectionsBody = (await collectionsResp.json()) as StacServerCollectionsResponse;
+  const searchBody = (await searchResp.json()) as StacServerSearchPage;
+
+  interface CollectionAccumulator {
+    title?: string;
+    organization?: string;
+    // Categories seen across items in this collection. Used to roll up to a
+    // single `category` value on the output — see the unanimity check below.
+    observations: Set<string>;
+    datasets: Map<string, Map<string, DatasetVariantConfig>>;
+  }
+
+  const accumulators = new Map<string, CollectionAccumulator>();
+
+  for (const coll of collectionsBody.collections ?? []) {
+    const organization = coll.id.includes("_") ? coll.id.split("_")[0] : undefined;
+    accumulators.set(coll.id, {
+      title: coll.title,
+      organization,
+      observations: new Set(),
+      datasets: new Map(),
+    });
+  }
+
+  for (const feature of searchBody.features ?? []) {
+    const collectionId =
+      feature.collection ??
+      (feature.id.includes("-") ? feature.id.split("-")[0] : undefined);
+    if (!collectionId) continue;
+
+    let entry = accumulators.get(collectionId);
+    if (!entry) {
+      entry = {
+        organization: collectionId.includes("_") ? collectionId.split("_")[0] : undefined,
+        observations: new Set(),
+        datasets: new Map(),
+      };
+      accumulators.set(collectionId, entry);
+    }
+
+    const props = feature.properties ?? {};
+    const observation = props["dclimate:observation"];
+    if (typeof observation === "string" && observation.length > 0) {
+      entry.observations.add(observation);
+    }
+    // Prefer the explicit property fields; fall back to id-parsing for items
+    // that pre-date the dclimate:* property convention.
+    const idParts = feature.id.split("-");
+    const datasetName =
+      (props["dclimate:dataset_id"] as string | undefined) ??
+      (idParts.length >= 2 ? idParts[1] : undefined);
+    const variantName =
+      (props["dclimate:variant"] as string | undefined) ??
+      (idParts.length >= 3 ? idParts.slice(2).join("-") : "default");
+    if (!datasetName) continue;
+
+    const cid = stripIpfsScheme(props["dclimate:latest_dataset_cid"] as string | undefined);
+
+    const variantConfig: DatasetVariantConfig = { variant: variantName };
+    if (cid) variantConfig.cid = cid;
+
+    const bbox = feature.bbox;
+    if (Array.isArray(bbox) && bbox.length >= 4) {
+      variantConfig.spatialExtent = {
+        bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
+      };
+    }
+
+    const startDt = props.start_datetime ?? props.datetime ?? null;
+    const endDt = props.end_datetime ?? props.datetime ?? null;
+    if (startDt !== null || endDt !== null) {
+      variantConfig.temporalExtent = { start: startDt, end: endDt };
+    }
+
+    let datasetVariants = entry.datasets.get(datasetName);
+    if (!datasetVariants) {
+      datasetVariants = new Map();
+      entry.datasets.set(datasetName, datasetVariants);
+    }
+    datasetVariants.set(variantName, variantConfig);
+  }
+
+  const result: DatasetCatalog = [];
+  for (const [collectionId, entry] of accumulators) {
+    if (entry.datasets.size === 0) continue;
+    const datasets: CatalogDataset[] = [];
+    for (const [datasetName, variants] of entry.datasets) {
+      datasets.push({ dataset: datasetName, variants: [...variants.values()] });
+    }
+    const collection: CatalogCollection = {
+      collection: collectionId,
+      datasets,
+    };
+    if (entry.organization) collection.organization = entry.organization;
+    if (entry.title) collection.title = entry.title;
+    // Only roll up to a collection-level category when every item in the
+    // collection agrees. Mixed observations would be a meaningful ambiguity
+    // — leave undefined and let callers handle it rather than picking a
+    // misleading value.
+    if (entry.observations.size === 1) {
+      collection.category = [...entry.observations][0];
+    }
+    result.push(collection);
+  }
+  return result;
 }
