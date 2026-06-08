@@ -19,6 +19,7 @@ The goal is to mirror the functionality of the Python `dclimate-zarr-client` pac
 - **No blockchain dependencies** – all resolution through HTTP APIs and IPFS
 - **TypeScript support** with full type definitions
 - **Dual build targets** for Node.js and browser environments
+- **OpenTelemetry hooks** for IPFS/Zarr open latency, status, and gateway attribution
 
 ## Installation
 
@@ -237,6 +238,21 @@ const dataset = await client.loadDataset({
 - **Dataset catalog** – includes both HTTP-backed dataset endpoints and direct CID entries. Use `listAvailableDatasets()` to explore all available datasets.
 - **Gateway** – set `gatewayUrl` on the client constructor or per-call in `loadDataset` options.
 - **Direct CID access** – supply `cid` in options to skip catalog resolution and load directly from IPFS.
+
+### OpenTelemetry
+
+The client emits OpenTelemetry API spans and metrics around IPFS/Zarr dataset opens. This is passive by default: no telemetry is exported unless the application configures an OpenTelemetry SDK/provider.
+
+Emitted names include:
+
+- Span `dclimate_client.ipfs.load_zarr_dataset`
+- Span `dclimate_client.ipfs.open_jaxray_store`
+- Counter `dclimate_client.ipfs.dataset_open.requests`
+- Histogram `dclimate_client.ipfs.dataset_open.duration`
+- Counter `dclimate_client.ipfs.store_open.requests`
+- Histogram `dclimate_client.ipfs.store_open.duration`
+
+Metric attributes include the gateway URL, store type, and status. The dataset CID is only attached to the trace span to avoid high-cardinality metric labels.
 
 ## API Reference
 
