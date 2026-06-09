@@ -14,7 +14,9 @@ function uniqueValues<T>(values: T[]): T[] {
 }
 
 function sortTimes(times: string[]): string[] {
-  return [...times].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+  return [...times].sort(
+    (a, b) => new Date(a).getTime() - new Date(b).getTime(),
+  );
 }
 
 function normalizeRecords(records: SampleRecord[]): SampleRecord[] {
@@ -24,7 +26,11 @@ function normalizeRecords(records: SampleRecord[]): SampleRecord[] {
   }));
 }
 
-function pickNearest(records: SampleRecord[], key: "latitude" | "longitude", target: number): number {
+function pickNearest(
+  records: SampleRecord[],
+  key: "latitude" | "longitude",
+  target: number,
+): number {
   let best = records[0][key];
   let bestDistance = Math.abs(best - target);
   for (const record of records) {
@@ -46,9 +52,15 @@ export class FakeDataset {
   constructor(records: SampleRecord[]) {
     this.internalRecords = normalizeRecords(records);
     this.coordMap = {
-      latitude: uniqueValues(this.internalRecords.map((record) => record.latitude)),
-      longitude: uniqueValues(this.internalRecords.map((record) => record.longitude)),
-      time: sortTimes(uniqueValues(this.internalRecords.map((record) => record.time))),
+      latitude: uniqueValues(
+        this.internalRecords.map((record) => record.latitude),
+      ),
+      longitude: uniqueValues(
+        this.internalRecords.map((record) => record.longitude),
+      ),
+      time: sortTimes(
+        uniqueValues(this.internalRecords.map((record) => record.time)),
+      ),
     };
     this.sizeMap = {
       latitude: this.coordMap.latitude.length,
@@ -75,11 +87,23 @@ export class FakeDataset {
     if (typeof selection.latitude === "number") {
       const nearestLat = pickNearest(filtered, "latitude", selection.latitude);
       filtered = filtered.filter((record) => record.latitude === nearestLat);
+    } else if (Array.isArray(selection.latitude)) {
+      filtered = filtered.filter((record) =>
+        selection.latitude.includes(record.latitude),
+      );
     }
 
     if (typeof selection.longitude === "number") {
-      const nearestLon = pickNearest(filtered, "longitude", selection.longitude);
+      const nearestLon = pickNearest(
+        filtered,
+        "longitude",
+        selection.longitude,
+      );
       filtered = filtered.filter((record) => record.longitude === nearestLon);
+    } else if (Array.isArray(selection.longitude)) {
+      filtered = filtered.filter((record) =>
+        selection.longitude.includes(record.longitude),
+      );
     }
 
     if (selection.time && typeof selection.time === "object") {
@@ -106,18 +130,19 @@ export class FakeDataset {
     // Return an object that mimics a DataArray with compute() and toRecords()
     return {
       compute: async () => ({
-        toRecords: () => this.internalRecords.map((record) => ({
-          latitude: record.latitude,
-          longitude: record.longitude,
-          time: record.time,
-          value: record.value,
-        }))
-      })
+        toRecords: () =>
+          this.internalRecords.map((record) => ({
+            latitude: record.latitude,
+            longitude: record.longitude,
+            time: record.time,
+            value: record.value,
+          })),
+      }),
     };
   }
 
   async toRecords(
-    variableName: string
+    variableName: string,
   ): Promise<Array<Record<CoordinateKey | "value", number | string>>> {
     if (variableName !== "precipitation") {
       return [];
@@ -158,6 +183,8 @@ export const SAMPLE_RECORDS: SampleRecord[] = [
   },
 ];
 
-export function createMockDataset(records: SampleRecord[] = SAMPLE_RECORDS): FakeDataset {
+export function createMockDataset(
+  records: SampleRecord[] = SAMPLE_RECORDS,
+): FakeDataset {
   return new FakeDataset(records);
 }

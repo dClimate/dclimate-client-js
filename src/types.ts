@@ -27,10 +27,25 @@ export interface PointQueryOptions {
   tolerance?: number;
 }
 
+export interface BoundsSelectionOptions {
+  latitudeKey?: string;
+  longitudeKey?: string;
+}
+
 export interface TimeRange {
   start: Date | string;
   end: Date | string;
 }
+
+export type BoundsSelection =
+  | readonly [west: number, south: number, east: number, north: number]
+  | {
+      west: number;
+      south: number;
+      east: number;
+      north: number;
+      options?: BoundsSelectionOptions;
+    };
 
 export interface GeoSelectionOptions {
   point?: {
@@ -38,6 +53,8 @@ export interface GeoSelectionOptions {
     longitude: number;
     options?: PointQueryOptions;
   };
+  bounds?: BoundsSelection;
+  boundsOptions?: BoundsSelectionOptions;
   timeRange?: TimeRange;
 }
 
