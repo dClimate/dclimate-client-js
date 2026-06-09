@@ -1,9 +1,15 @@
-import { Dataset, DataArray } from "@dclimate/jaxray";
+import {
+  Dataset,
+  DataArray,
+  type CoordinateValue,
+  type Selection,
+} from "@dclimate/jaxray";
 import { InvalidSelectionError, NoDataFoundError } from "./errors.js";
 import {
   BoundsSelection,
   BoundsSelectionOptions,
   DatasetMetadata,
+  DatasetObject,
   GeoSelectionOptions,
   PointQueryOptions,
   TimeRange,
@@ -59,8 +65,8 @@ export class GeoTemporalDataset {
     return this.dataset.coords;
   }
 
-  toObject(): any {
-    return this.dataset.toObject();
+  toObject(): DatasetObject {
+    return this.dataset.toObject() as DatasetObject;
   }
 
   toJSON(): string {
@@ -191,7 +197,7 @@ export class GeoTemporalDataset {
       );
     }
 
-    let normalizedRange: { start: unknown; end: unknown };
+    let normalizedRange: { start: CoordinateValue; end: CoordinateValue };
     try {
       normalizedRange = normalizeTimeRange(range, coords);
     } catch (error) {
@@ -204,12 +210,13 @@ export class GeoTemporalDataset {
 
     let subset: Dataset;
     try {
-      subset = await this.dataset.sel({
+      const selection: Selection = {
         [timeKey]: {
-          start: normalizedRange.start as any,
-          stop: normalizedRange.end as any,
+          start: normalizedRange.start,
+          stop: normalizedRange.end,
         },
-      });
+      };
+      subset = await this.dataset.sel(selection);
     } catch (error) {
       throw new InvalidSelectionError(
         `Failed to apply time range on "${timeKey}": ${String(

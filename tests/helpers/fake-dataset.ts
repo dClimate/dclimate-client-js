@@ -1,4 +1,20 @@
 type CoordinateKey = "latitude" | "longitude" | "time";
+type FakeSelectionRange = {
+  start: string | number | Date;
+  stop: string | number | Date;
+};
+type FakeSelectionValue =
+  | number
+  | Array<number | string>
+  | FakeSelectionRange;
+type FakeVariableRecords = Array<
+  Record<CoordinateKey | "value", number | string>
+>;
+type FakeDataVariable = {
+  compute: () => Promise<{
+    toRecords: () => FakeVariableRecords;
+  }>;
+};
 
 export interface SampleRecord {
   latitude: number;
@@ -6,8 +22,6 @@ export interface SampleRecord {
   time: string;
   value: number;
 }
-
-const COORDINATE_KEYS: CoordinateKey[] = ["latitude", "longitude", "time"];
 
 function uniqueValues<T>(values: T[]): T[] {
   return Array.from(new Set(values));
@@ -24,6 +38,15 @@ function normalizeRecords(records: SampleRecord[]): SampleRecord[] {
     ...record,
     time: new Date(record.time).toISOString(),
   }));
+}
+
+function isFakeSelectionRange(value: unknown): value is FakeSelectionRange {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "start" in value &&
+    "stop" in value
+  );
 }
 
 function pickNearest(
@@ -81,33 +104,38 @@ export class FakeDataset {
     return this.variables;
   }
 
-  async sel(selection: Record<string, any>): Promise<FakeDataset> {
+  async sel(
+    selection: Partial<Record<CoordinateKey, FakeSelectionValue>>,
+  ): Promise<FakeDataset> {
     let filtered = this.internalRecords;
 
-    if (typeof selection.latitude === "number") {
-      const nearestLat = pickNearest(filtered, "latitude", selection.latitude);
+    const latitudeSelection = selection.latitude;
+    if (typeof latitudeSelection === "number") {
+      const nearestLat = pickNearest(filtered, "latitude", latitudeSelection);
       filtered = filtered.filter((record) => record.latitude === nearestLat);
-    } else if (Array.isArray(selection.latitude)) {
+    } else if (Array.isArray(latitudeSelection)) {
       filtered = filtered.filter((record) =>
-        selection.latitude.includes(record.latitude),
+        latitudeSelection.includes(record.latitude),
       );
     }
 
-    if (typeof selection.longitude === "number") {
+    const longitudeSelection = selection.longitude;
+    if (typeof longitudeSelection === "number") {
       const nearestLon = pickNearest(
         filtered,
         "longitude",
-        selection.longitude,
+        longitudeSelection,
       );
       filtered = filtered.filter((record) => record.longitude === nearestLon);
-    } else if (Array.isArray(selection.longitude)) {
+    } else if (Array.isArray(longitudeSelection)) {
       filtered = filtered.filter((record) =>
-        selection.longitude.includes(record.longitude),
+        longitudeSelection.includes(record.longitude),
       );
     }
 
-    if (selection.time && typeof selection.time === "object") {
-      const { start, stop } = selection.time;
+    const timeSelection = selection.time;
+    if (isFakeSelectionRange(timeSelection)) {
+      const { start, stop } = timeSelection;
       const startDate = new Date(start);
       const stopDate = new Date(stop);
       filtered = filtered.filter((record) => {
@@ -123,7 +151,7 @@ export class FakeDataset {
     return new FakeDataset(filtered);
   }
 
-  getVariable(name: string): any {
+  getVariable(name: string): FakeDataVariable | null {
     if (name !== "precipitation") {
       return null;
     }
@@ -143,7 +171,7 @@ export class FakeDataset {
 
   async toRecords(
     variableName: string,
-  ): Promise<Array<Record<CoordinateKey | "value", number | string>>> {
+  ): Promise<FakeVariableRecords> {
     if (variableName !== "precipitation") {
       return [];
     }

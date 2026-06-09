@@ -158,7 +158,7 @@ describe("Dataset metadata", () => {
 
     for (const field of requiredFields) {
       expect(metadata).toHaveProperty(field);
-      expect((metadata as any)[field]).toBeDefined();
+      expect((metadata as unknown as Record<string, unknown>)[field]).toBeDefined();
     }
   }, 30000);
 
@@ -174,7 +174,7 @@ describe("Dataset metadata", () => {
     }) as [GeoTemporalDataset, DatasetMetadata];
 
     // timestamp field was removed in STAC migration
-    expect((metadata as any).timestamp).toBeUndefined();
+    expect((metadata as unknown as Record<string, unknown>).timestamp).toBeUndefined();
 
     // fetchedAt is the replacement for timestamp
     expect(metadata.fetchedAt).toBeDefined();

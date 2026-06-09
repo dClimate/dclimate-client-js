@@ -6,7 +6,6 @@ import {
 import { createMockDataset, SAMPLE_RECORDS } from "./helpers/fake-dataset.js";
 
 const openDatasetFromCidMock = vi.hoisted(() => vi.fn());
-const fetchMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../src/ipfs/open-dataset.js", () => ({
   openDatasetFromCid: openDatasetFromCidMock,
@@ -40,8 +39,9 @@ describe("DClimateClient usage", () => {
     expect(metadata.cid).toMatch(/^bafy/); // Real CID from STAC
     expect(metadata.source).toBe("stac");
     // timestamp and url fields removed in STAC migration
-    expect((metadata as any).timestamp).toBeUndefined();
-    expect((metadata as any).url).toBeUndefined();
+    const metadataRecord = metadata as unknown as Record<string, unknown>;
+    expect(metadataRecord.timestamp).toBeUndefined();
+    expect(metadataRecord.url).toBeUndefined();
 
     const point = await (dataset as GeoTemporalDataset).point(40.75, -73.99);
     const slice = await point.timeRange({

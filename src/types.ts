@@ -87,3 +87,20 @@ export interface DatasetRequest {
   organization?: string;
   cid?: string;
 }
+
+export interface DataArrayObject {
+  data: unknown;
+  dims: string[];
+  coords: Record<string, unknown[]>;
+  attrs: Record<string, unknown>;
+  name?: string;
+  shape: number[];
+}
+
+export interface DatasetObject {
+  dataVars: Record<string, DataArrayObject>;
+  coords: Record<string, unknown[]>;
+  attrs: Record<string, unknown>;
+  dims: string[];
+  sizes: Record<string, number>;
+}

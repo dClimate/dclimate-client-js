@@ -161,8 +161,8 @@ export class DClimateClient {
           request.variant,
           resolvedOrganization
         );
-        resolvedCollection = resolvedInfo.collectionId;
-        resolvedOrganization = resolvedInfo.organizationId ?? resolvedOrganization;
+        const resolvedOrganizationId =
+          resolvedInfo.organizationId ?? resolvedOrganization;
 
         // Multiple variants with concat metadata found
         // Load and concatenate based on dclimate:concatPriority
@@ -170,7 +170,7 @@ export class DClimateClient {
           {
             ...request,
             collection: resolvedInfo.collectionId,
-            organization: resolvedInfo.organizationId ?? resolvedOrganization,
+            organization: resolvedOrganizationId,
             variant: request.variant,
           },
           concatenableItems,
@@ -184,7 +184,6 @@ export class DClimateClient {
 
     // Fall back to single variant loading
     let cid: string | null = null;
-    let resolvedPath: string;
     let metadataDataset = request.dataset;
     let metadataCollection = resolvedCollection || request.collection;
     let metadataVariant = request.variant ?? "";
@@ -231,7 +230,7 @@ export class DClimateClient {
 
     // Build path from resolved names
     const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
-    resolvedPath = pathParts.join("-");
+    const resolvedPath = pathParts.join("-");
     
     const dataset = await openDatasetFromCid(cid, {
       gatewayUrl,

@@ -118,7 +118,7 @@ export async function rectangle(
   const filtered = await dataset.sel({
     [latitudeKey]: selectedLats,
     [longitudeKey]: selectedLons,
-  } as any);
+  });
 
   return filtered;
 }

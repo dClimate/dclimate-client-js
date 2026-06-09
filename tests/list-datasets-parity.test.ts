@@ -90,7 +90,6 @@ const haveBoth =
   stacCatalog !== null && ipfsCatalog !== null && !ipfsDegraded;
 
 if (ipfsDegraded) {
-  // eslint-disable-next-line no-console
   console.warn(
     "[parity] IPFS catalog returned 0 collections while STAC server returned " +
       `${stacCatalog!.length} — IPFS gateway can serve the root pointer but not ` +
