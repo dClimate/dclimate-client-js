@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Dataset, DataArray } from "@dclimate/jaxray";
 import { points, circle, rectangle } from "../src/shapes/index.js";
-import { InvalidSelectionError, NoDataFoundError } from "../src/errors.js";
+import { InvalidSelectionError } from "../src/errors.js";
 import { isDatasetEmpty } from "../src/utils.js";
 
 // Helper to create a test dataset
@@ -69,8 +69,12 @@ describe("Shapes Module", () => {
       const result = await points(dataset, [40.0, 40.5], [-74.0, -73.5]);
 
       const tempVar = result.getVariable("temperature");
-      expect(Array.isArray(tempVar.data)).toBe(true);
-      expect((tempVar.data as any[]).length).toBeGreaterThan(0);
+      const tempData = tempVar.data;
+      expect(Array.isArray(tempData)).toBe(true);
+      if (!Array.isArray(tempData)) {
+        throw new Error("Expected temperature data to be an array");
+      }
+      expect(tempData.length).toBeGreaterThan(0);
     });
 
     it("should throw error if point arrays have different lengths", async () => {

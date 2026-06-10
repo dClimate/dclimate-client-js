@@ -1,16 +1,25 @@
-import { Dataset, DataArray } from "@dclimate/jaxray";
 import {
-  InvalidSelectionError,
-  NoDataFoundError,
-} from "./errors.js";
+  Dataset,
+  DataArray,
+  type CoordinateValue,
+  type Selection,
+} from "@dclimate/jaxray";
+import { InvalidSelectionError, NoDataFoundError } from "./errors.js";
 import {
+  BoundsSelection,
+  BoundsSelectionOptions,
   DatasetMetadata,
+  DatasetObject,
   GeoSelectionOptions,
   PointQueryOptions,
   TimeRange,
 } from "./types.js";
 import { normalizeTimeRange, normalizeSegment } from "./utils.js";
-import { points as pointsShape, circle as circleShape, rectangle as rectangleShape } from "./shapes/index.js";
+import {
+  points as pointsShape,
+  circle as circleShape,
+  rectangle as rectangleShape,
+} from "./shapes/index.js";
 
 type SelectionMethod = Parameters<Dataset["sel"]>[1] extends infer Options
   ? Options extends { method?: infer Method }
@@ -37,7 +46,7 @@ const DEFAULT_TIME_KEYS = [
 export class GeoTemporalDataset {
   constructor(
     private readonly dataset: Dataset,
-    private readonly metadata: DatasetMetadata
+    private readonly metadata: DatasetMetadata,
   ) {}
 
   get info(): DatasetMetadata {
@@ -56,8 +65,8 @@ export class GeoTemporalDataset {
     return this.dataset.coords;
   }
 
-  toObject(): any {
-    return this.dataset.toObject();
+  toObject(): DatasetObject {
+    return this.dataset.toObject() as DatasetObject;
   }
 
   toJSON(): string {
@@ -66,7 +75,7 @@ export class GeoTemporalDataset {
 
   async toRecords(
     varName: string,
-    options?: { precision?: number }
+    options?: { precision?: number },
   ): Promise<Array<Record<string, unknown>>> {
     const dataArray = this.dataset.getVariable(varName);
     if (!dataArray) {
@@ -95,6 +104,12 @@ export class GeoTemporalDataset {
   async select(options: GeoSelectionOptions): Promise<GeoTemporalDataset> {
     let current: GeoTemporalDataset = this;
 
+    if (options.point && options.bounds) {
+      throw new InvalidSelectionError(
+        "Use either point or bounds selection, not both.",
+      );
+    }
+
     // Apply selections in order: point first, then time range
     // Point selection must come first because it changes the dataset structure
     if (options.point) {
@@ -116,13 +131,26 @@ export class GeoTemporalDataset {
       }
     }
 
+    if (options.bounds) {
+      const { west, south, east, north, boundsOptions } =
+        normalizeBoundsSelection(options.bounds, options.boundsOptions);
+      const subset = await current.rectangle(
+        south,
+        west,
+        north,
+        east,
+        boundsOptions,
+      );
+      current = current.wrapDataset(subset);
+    }
+
     return current;
   }
 
   async point(
     latitude: number,
     longitude: number,
-    options: PointQueryOptions = {}
+    options: PointQueryOptions = {},
   ): Promise<GeoTemporalDataset> {
     const latKey =
       options.latitudeKey ?? this.inferCoordinateKey(DEFAULT_LATITUDE_KEYS);
@@ -131,7 +159,7 @@ export class GeoTemporalDataset {
 
     if (!latKey || !lonKey) {
       throw new InvalidSelectionError(
-        "Latitude/longitude coordinates were not found in the dataset."
+        "Latitude/longitude coordinates were not found in the dataset.",
       );
     }
 
@@ -149,50 +177,51 @@ export class GeoTemporalDataset {
 
   async timeRange(
     range: TimeRange,
-    dimension = "time"
+    dimension = "time",
   ): Promise<GeoTemporalDataset> {
     const candidateKeys = Array.from(
-      new Set([dimension, ...DEFAULT_TIME_KEYS])
+      new Set([dimension, ...DEFAULT_TIME_KEYS]),
     ).filter(Boolean) as string[];
     const timeKey = this.inferCoordinateKey(candidateKeys);
 
     if (!timeKey) {
       throw new InvalidSelectionError(
-        `Coordinate "${dimension}" not found in dataset.`
+        `Coordinate "${dimension}" not found in dataset.`,
       );
     }
 
     const coords = this.dataset.coords[timeKey];
     if (!Array.isArray(coords) || coords.length === 0) {
       throw new InvalidSelectionError(
-        `Coordinate "${timeKey}" not found in dataset.`
+        `Coordinate "${timeKey}" not found in dataset.`,
       );
     }
 
-    let normalizedRange: { start: unknown; end: unknown };
+    let normalizedRange: { start: CoordinateValue; end: CoordinateValue };
     try {
       normalizedRange = normalizeTimeRange(range, coords);
     } catch (error) {
       throw new InvalidSelectionError(
         `Unable to normalize time range: ${String(
-          (error as Error).message ?? error
-        )}`
+          (error as Error).message ?? error,
+        )}`,
       );
     }
 
     let subset: Dataset;
     try {
-      subset = await this.dataset.sel({
+      const selection: Selection = {
         [timeKey]: {
-          start: normalizedRange.start as any,
-          stop: normalizedRange.end as any,
+          start: normalizedRange.start,
+          stop: normalizedRange.end,
         },
-      });
+      };
+      subset = await this.dataset.sel(selection);
     } catch (error) {
       throw new InvalidSelectionError(
         `Failed to apply time range on "${timeKey}": ${String(
-          (error as Error).message ?? error
-        )}`
+          (error as Error).message ?? error,
+        )}`,
       );
     }
 
@@ -204,7 +233,7 @@ export class GeoTemporalDataset {
   private inferCoordinateKey(candidates: string[]): string | undefined {
     const coords = this.dataset.coords;
     const normalizedKeys = Object.keys(coords).map((key) =>
-      normalizeSegment(key)
+      normalizeSegment(key),
     );
 
     for (const candidate of candidates) {
@@ -218,9 +247,10 @@ export class GeoTemporalDataset {
     return undefined;
   }
 
-  private buildSelectionOptions(
-    options: PointQueryOptions
-  ): { method?: SelectionMethod; tolerance?: number } {
+  private buildSelectionOptions(options: PointQueryOptions): {
+    method?: SelectionMethod;
+    tolerance?: number;
+  } {
     const method =
       options.method === "exact" ? undefined : ("nearest" as SelectionMethod);
     const selectionOptions: { method?: SelectionMethod; tolerance?: number } =
@@ -235,6 +265,11 @@ export class GeoTemporalDataset {
     return selectionOptions;
   }
 
+  private wrapDataset(dataset: Dataset): GeoTemporalDataset {
+    const wrapped = new GeoTemporalDataset(dataset, this.metadata);
+    wrapped.ensureHasData();
+    return wrapped;
+  }
 
   /**
    * Select data at specific point coordinates
@@ -253,7 +288,7 @@ export class GeoTemporalDataset {
       tolerance?: number;
       latitudeKey?: string;
       longitudeKey?: string;
-    }
+    },
   ): Promise<Dataset> {
     return await pointsShape(this.dataset, pointLats, pointLons, options);
   }
@@ -274,9 +309,15 @@ export class GeoTemporalDataset {
     options?: {
       latitudeKey?: string;
       longitudeKey?: string;
-    }
+    },
   ): Promise<Dataset> {
-    return await circleShape(this.dataset, centerLat, centerLon, radiusKm, options);
+    return await circleShape(
+      this.dataset,
+      centerLat,
+      centerLon,
+      radiusKm,
+      options,
+    );
   }
 
   /**
@@ -297,8 +338,78 @@ export class GeoTemporalDataset {
     options?: {
       latitudeKey?: string;
       longitudeKey?: string;
-    }
+    },
   ): Promise<Dataset> {
-    return await rectangleShape(this.dataset, minLat, minLon, maxLat, maxLon, options);
+    return await rectangleShape(
+      this.dataset,
+      minLat,
+      minLon,
+      maxLat,
+      maxLon,
+      options,
+    );
   }
+}
+
+function normalizeBoundsSelection(
+  bounds: BoundsSelection,
+  fallbackOptions?: BoundsSelectionOptions,
+): {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  boundsOptions?: BoundsSelectionOptions;
+} {
+  const isTuple = isBoundsSelectionTuple(bounds);
+  const normalized = isTuple
+    ? {
+        west: bounds[0],
+        south: bounds[1],
+        east: bounds[2],
+        north: bounds[3],
+        boundsOptions: fallbackOptions,
+      }
+    : {
+        west: bounds.west,
+        south: bounds.south,
+        east: bounds.east,
+        north: bounds.north,
+        boundsOptions: bounds.options ?? fallbackOptions,
+      };
+
+  if (
+    [normalized.west, normalized.south, normalized.east, normalized.north].some(
+      (value) => typeof value !== "number" || !Number.isFinite(value),
+    )
+  ) {
+    throw new InvalidSelectionError(
+      "Bounds selection must use finite west, south, east, and north numbers.",
+    );
+  }
+
+  if (normalized.west >= normalized.east) {
+    throw new InvalidSelectionError(
+      `west (${normalized.west}) must be less than east (${normalized.east}).`,
+    );
+  }
+
+  if (normalized.south >= normalized.north) {
+    throw new InvalidSelectionError(
+      `south (${normalized.south}) must be less than north (${normalized.north}).`,
+    );
+  }
+
+  return normalized;
+}
+
+function isBoundsSelectionTuple(
+  bounds: BoundsSelection,
+): bounds is readonly [
+  west: number,
+  south: number,
+  east: number,
+  north: number,
+] {
+  return Array.isArray(bounds);
 }

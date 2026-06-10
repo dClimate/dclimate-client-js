@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DatasetMetadata, DClimateClient, GeoTemporalDataset } from "../src/index.js";
-import { InvalidSelectionError, NoDataFoundError } from "../src/errors.js";
+import { DatasetMetadata, DatasetRequest, DClimateClient, GeoTemporalDataset } from "../src/index.js";
+import { InvalidSelectionError } from "../src/errors.js";
 
 describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 const client = new DClimateClient();
 
-const DATASET_REQUESTS: Record<string, any> = {
+const DATASET_REQUESTS: Record<string, DatasetRequest> = {
   fpar: { collection: "copernicus_clms", organization: "copernicus", dataset: "fpar", variant: "default" },
   "ifs-temperature": { collection: "ifs", organization: "ecmwf", dataset: "temperature_forecast", variant: "default" },
   "ifs-precip": { collection: "ifs", organization: "ecmwf", dataset: "precipitation_forecast", variant: "default" },

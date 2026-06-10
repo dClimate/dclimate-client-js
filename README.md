@@ -140,6 +140,27 @@ const [subset, metadata] = await client.selectDataset({
 });
 ```
 
+Use `bounds` for rectangular lon/lat selections. Tuple bounds are
+`[west, south, east, north]`.
+
+```typescript
+const [westernEurope, metadata] = await client.selectDataset({
+  request: {
+    organization: "ecmwf",
+    collection: "era5",
+    dataset: "temperature_2m",
+    variant: "finalized"
+  },
+  selection: {
+    bounds: [-12, 35, 16, 60],
+    timeRange: {
+      start: "2024-01-01T00:00:00Z",
+      end: "2024-01-07T23:00:00Z",
+    },
+  }
+});
+```
+
 ### Geographic shape selections
 
 The client supports advanced geographic selections beyond single points:

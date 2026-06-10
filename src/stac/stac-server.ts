@@ -11,6 +11,7 @@ import type {
   DatasetCatalog,
   DatasetVariantConfig,
 } from "./stac-catalog.js";
+import { getStringProperty } from "./stac-catalog.js";
 
 export const DEFAULT_STAC_SERVER_URL = "https://api.stac.dclimate.net";
 
@@ -25,7 +26,7 @@ export interface StacServerItem {
   type: "Feature";
   id: string;
   collection?: string;
-  properties: Record<string, any>;
+  properties: Record<string, unknown>;
   assets: Record<string, { href: string; type?: string; title?: string }>;
 }
 
@@ -88,7 +89,7 @@ export async function resolveCidFromStacServer(
 
   if (variant) {
     selectedItem = matches.find(
-      (f) => f.properties["dclimate:variant"] === variant
+      (f) => getStringProperty(f.properties, "dclimate:variant") === variant
     );
     if (!selectedItem) {
       throw new Error(
@@ -99,12 +100,13 @@ export async function resolveCidFromStacServer(
   } else {
     // Prefer: default > final > finalized > latest > first match
     selectedItem = matches[0];
-    resolvedVariant = matches[0].properties["dclimate:variant"] || "default";
+    resolvedVariant =
+      getStringProperty(matches[0].properties, "dclimate:variant") ?? "default";
 
     const preferredOrder = ["default", "final", "finalized", "latest"];
     for (const preferred of preferredOrder) {
       const found = matches.find(
-        (f) => f.properties["dclimate:variant"] === preferred
+        (f) => getStringProperty(f.properties, "dclimate:variant") === preferred
       );
       if (found) {
         selectedItem = found;
@@ -160,7 +162,7 @@ interface StacServerSearchFeature {
   id: string;
   collection?: string;
   bbox?: number[];
-  properties: Record<string, any>;
+  properties: Record<string, unknown>;
 }
 
 interface StacServerSearchPage {
@@ -269,14 +271,16 @@ export async function listAvailableDatasetsFromStacServer(
     // that pre-date the dclimate:* property convention.
     const idParts = feature.id.split("-");
     const datasetName =
-      (props["dclimate:dataset_id"] as string | undefined) ??
+      getStringProperty(props, "dclimate:dataset_id") ??
       (idParts.length >= 2 ? idParts[1] : undefined);
     const variantName =
-      (props["dclimate:variant"] as string | undefined) ??
+      getStringProperty(props, "dclimate:variant") ??
       (idParts.length >= 3 ? idParts.slice(2).join("-") : "default");
     if (!datasetName) continue;
 
-    const cid = stripIpfsScheme(props["dclimate:latest_dataset_cid"] as string | undefined);
+    const cid = stripIpfsScheme(
+      getStringProperty(props, "dclimate:latest_dataset_cid")
+    );
 
     const variantConfig: DatasetVariantConfig = { variant: variantName };
     if (cid) variantConfig.cid = cid;
@@ -288,8 +292,14 @@ export async function listAvailableDatasetsFromStacServer(
       };
     }
 
-    const startDt = props.start_datetime ?? props.datetime ?? null;
-    const endDt = props.end_datetime ?? props.datetime ?? null;
+    const startDt =
+      getStringProperty(props, "start_datetime") ??
+      getStringProperty(props, "datetime") ??
+      null;
+    const endDt =
+      getStringProperty(props, "end_datetime") ??
+      getStringProperty(props, "datetime") ??
+      null;
     if (startDt !== null || endDt !== null) {
       variantConfig.temporalExtent = { start: startDt, end: endDt };
     }

@@ -175,10 +175,10 @@ export async function circle(
   // Use isel to select only the valid indices
   let filtered = await masked.isel({
     [latitudeKey]: validLatIndices,
-  } as any);
+  });
 
   filtered = await filtered.isel({
     [longitudeKey]: validLonIndices,
-  } as any);
+  });
   return filtered;
 }

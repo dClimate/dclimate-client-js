@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { haversine } from "../src/math/haversine";
 
 describe("haversine", () => {
-  it.only("should calculate distance between two points (scalar inputs)", () => {
+  it("should calculate distance between two points (scalar inputs)", () => {
     // New York City to Los Angeles
     const lat1 = 40.7128;
     const lon1 = -74.006;
@@ -11,7 +11,7 @@ describe("haversine", () => {
 
     const distance = haversine(lat1, lon1, lat2, lon2);
 
-    // Expected distance is approximately 3944 km
+    // Expected distance is approximately 3936 km with a 6371 km earth radius
     expect(typeof distance).toBe("number");
     expect(distance).toBeCloseTo(3936, -1); // Within 10 km
   });
@@ -61,8 +61,8 @@ describe("haversine", () => {
     expect(Array.isArray(distances)).toBe(true);
     expect(distances).toHaveLength(2);
     // Both should be the same distance (NYC to LA and back)
-    expect((distances as number[])[0]).toBeCloseTo(3944, -1);
-    expect((distances as number[])[1]).toBeCloseTo(3944, -1);
+    expect((distances as number[])[0]).toBeCloseTo(3936, -1);
+    expect((distances as number[])[1]).toBeCloseTo(3936, -1);
   });
 
   it("should handle mixed scalar and array inputs", () => {
@@ -99,8 +99,8 @@ describe("haversine", () => {
 
     const distance = haversine(lat1, lon1, lat2, lon2);
 
-    // Expected distance is approximately 6930 km
-    expect(distance).toBeCloseTo(6930, -1);
+    // Expected distance is approximately 6870 km with a 6371 km earth radius
+    expect(distance).toBeCloseTo(6870, -1);
   });
 
   it("should broadcast arrays of different lengths", () => {

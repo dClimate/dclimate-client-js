@@ -21,7 +21,7 @@ export function isDatasetEmpty(dataset: Dataset): boolean {
   return Object.values(sizes).some((size) => size === 0);
 }
 
-function toDate(value: Date | string): Date | null {
+function toDate(value: Date | string | number): Date | null {
   if (value instanceof Date) return value;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -71,8 +71,8 @@ export function normalizeTimeRange(
     return { start: startValue, end: endValue };
   }
 
-  const startDate = toDate(startValue as any);
-  const endDate = toDate(endValue as any);
+  const startDate = toDate(startValue);
+  const endDate = toDate(endValue);
   if (startDate && endDate && startDate > endDate) {
     return {
       start: endDate.toISOString(),

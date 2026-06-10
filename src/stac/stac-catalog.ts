@@ -77,7 +77,7 @@ export interface StacLink {
   type?: string;
   title?: string;
   // For dclimate:id, dclimate:types and other arbitrary metadata
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface StacAsset {
@@ -91,8 +91,8 @@ export interface StacItem {
   type: "Feature";
   stac_version: string;
   id: string;
-  properties: Record<string, any>;
-  geometry: any;
+  properties: Record<string, unknown>;
+  geometry: unknown;
   bbox?: number[];
   assets: Record<string, StacAsset>;
   links: StacLink[];
@@ -106,8 +106,8 @@ export interface StacCollection {
   description?: string;
   keywords?: string[];
   license?: string;
-  extent?: any;
-  summaries?: Record<string, any>;
+  extent?: unknown;
+  summaries?: Record<string, unknown>;
   links: StacLink[];
   items?: StacItem[]; // Loaded items
   organizationId?: string;
@@ -131,6 +131,22 @@ interface CatalogCacheEntry {
   catalog: StacCatalog;
   timestamp: number;
   rootCid: string;
+}
+
+export function getStringProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): string | undefined {
+  const value = properties?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getNumberProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): number | undefined {
+  const value = properties?.[key];
+  return typeof value === "number" ? value : undefined;
 }
 
 export interface StacCatalogOptions {
@@ -629,20 +645,20 @@ export function getConcatenableItemsFromStac(
     // Check if this item matches our dataset
     if (itemCollection === collection && itemDataset === dataset) {
       // Check for concatenation metadata in properties
-      const concatPriority = item.properties["dclimate:concatPriority"];
-      const concatDimension = item.properties["dclimate:concatDimension"];
-
       // Also check in link metadata (fallback)
       const itemLink = collectionObj.links.find(
         (link) =>
           link.rel === "item" && link?.["dclimate:id"] === item.id
       );
 
-      const linkConcatPriority = itemLink?.["dclimate:concatPriority"];
-      const linkConcatDimension = itemLink?.["dclimate:concatDimension"];
-
-      const priority = concatPriority ?? linkConcatPriority;
-      const dimension = concatDimension ?? linkConcatDimension ?? "time";
+      const priority =
+        getNumberProperty(item.properties, "dclimate:concatPriority") ??
+        getNumberProperty(itemLink, "dclimate:concatPriority") ??
+        0;
+      const dimension =
+        getStringProperty(item.properties, "dclimate:concatDimension") ??
+        getStringProperty(itemLink, "dclimate:concatDimension") ??
+        "time";
 
       // Extract CID from assets
       const dataAsset = item.assets.data;
@@ -653,7 +669,7 @@ export function getConcatenableItemsFromStac(
       matchingItems.push({
         variant: itemVariant,
         cid,
-        concatPriority: priority ?? 0,
+        concatPriority: priority,
         concatDimension: dimension,
       });
     }
@@ -677,7 +693,7 @@ export function listAvailableDatasetsFromStac(
     const datasetNamesFromLink = collection.datasetNames || [];
 
     // Group items by dataset
-    const datasetMap = new Map<string, { dataset: string; variants: any[] }>();
+    const datasetMap = new Map<string, CatalogDataset>();
 
     for (const item of collection.items || []) {
       const parts = item.id.split("-");
@@ -711,8 +727,14 @@ export function listAvailableDatasetsFromStac(
         };
       }
 
-      const startDt = item.properties?.start_datetime ?? item.properties?.datetime ?? null;
-      const endDt = item.properties?.end_datetime ?? item.properties?.datetime ?? null;
+      const startDt =
+        getStringProperty(item.properties, "start_datetime") ??
+        getStringProperty(item.properties, "datetime") ??
+        null;
+      const endDt =
+        getStringProperty(item.properties, "end_datetime") ??
+        getStringProperty(item.properties, "datetime") ??
+        null;
       if (startDt != null || endDt != null) {
         variantEntry.temporalExtent = {
           start: startDt ?? null,

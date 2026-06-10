@@ -1,4 +1,4 @@
-import { Dataset, DataArray } from "@dclimate/jaxray";
+import { Dataset, DataArray, type Selection } from "@dclimate/jaxray";
 import { InvalidSelectionError, NoDataFoundError } from "../errors.js";
 
 /**
@@ -76,16 +76,18 @@ export async function points(
 
   try {
     if (snapToGrid) {
-      selectedData = await dataset.sel({
+      const selection = {
         [latitudeKey]: lats,
         [longitudeKey]: lons,
-      } as any);
+      } as unknown as Selection;
+      selectedData = await dataset.sel(selection);
     } else {
+      const selection = {
+        [latitudeKey]: lats,
+        [longitudeKey]: lons,
+      } as unknown as Selection;
       selectedData = await dataset.sel(
-        {
-          [latitudeKey]: lats,
-          [longitudeKey]: lons,
-        } as any,
+        selection,
         {
           method: "nearest",
           tolerance,
