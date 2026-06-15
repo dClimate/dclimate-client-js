@@ -37,6 +37,33 @@ export interface ResolvedCidFromServer {
   variant: string;
 }
 
+function datasetIdFromItemId(
+  itemId: string,
+  collection: string
+): string | undefined {
+  const prefix = `${collection}-`;
+  const remainder = itemId.startsWith(prefix) ? itemId.slice(prefix.length) : itemId;
+  const [dataset] = remainder.split("-");
+  return dataset || undefined;
+}
+
+function featureMatchesDataset(
+  feature: StacServerItem,
+  collection: string,
+  dataset: string
+): boolean {
+  if (feature.collection && feature.collection !== collection) {
+    return false;
+  }
+
+  const datasetId = getStringProperty(feature.properties, "dclimate:dataset_id");
+  if (datasetId) {
+    return datasetId === dataset;
+  }
+
+  return datasetIdFromItemId(feature.id, collection) === dataset;
+}
+
 /**
  * Resolve dataset CID via STAC server /search API.
  *
@@ -75,9 +102,11 @@ export async function resolveCidFromStacServer(
   const data: StacServerSearchResponse = await response.json();
   const features = data.features || [];
 
-  // Filter to matching dataset (item ID pattern: {collection}-{dataset}-{variant})
-  const prefix = `${collection}-${dataset}`;
-  const matches = features.filter((f) => f.id.startsWith(prefix));
+  // Filter to the exact dataset. A prefix match would conflate datasets such
+  // as precipitation_total and precipitation_total_land.
+  const matches = features.filter((f) =>
+    featureMatchesDataset(f, collection, dataset)
+  );
 
   if (matches.length === 0) {
     throw new Error(`No items found for ${collection}/${dataset}`);
