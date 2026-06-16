@@ -120,6 +120,35 @@ const [finalized, metadata] = await client.loadDataset({
 
 ```
 
+### ERA5 land datasets
+
+ERA5 and ERA5-Land datasets are separate dataset IDs within the ECMWF ERA5 collection. Use `listAvailableDatasets()` to inspect the exact names before loading.
+
+```typescript
+// Non-land ERA5 total precipitation
+const [precipitation, precipitationMetadata] = await client.loadDataset({
+  request: {
+    organization: "ecmwf",
+    collection: "era5",
+    dataset: "precipitation_total",
+    variant: "finalized"
+  }
+});
+
+// ERA5-Land total precipitation
+const [landPrecipitation, landPrecipitationMetadata] = await client.loadDataset({
+  request: {
+    organization: "ecmwf",
+    collection: "era5",
+    dataset: "precipitation_total_land",
+    variant: "finalized"
+  }
+});
+
+// ERA5-Land wind datasets follow the same pattern:
+// dataset: "wind_u_10m_land" or dataset: "wind_v_10m_land"
+```
+
 ### Selecting while loading
 
 ```typescript
