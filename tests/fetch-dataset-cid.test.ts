@@ -143,6 +143,20 @@ describe("loadDataset CID resolution", () => {
       );
     });
 
+    it("passes zarrGroup through and records it in metadata", async () => {
+      const client = new DClimateClient();
+      const [, metadata] = await client.loadDataset({
+        request: { cid: "bafygrouped" },
+        options: { zarrGroup: "/0/" },
+      });
+
+      expect(openDatasetFromCidMock).toHaveBeenCalledWith(
+        "bafygrouped",
+        expect.objectContaining({ zarrGroup: "0" })
+      );
+      expect(metadata.zarrGroup).toBe("0");
+    });
+
     it("sets source to direct_cid in metadata", async () => {
       const client = new DClimateClient();
       const [dataset] = await client.loadDataset({

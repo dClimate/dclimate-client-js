@@ -18,6 +18,7 @@ export interface LoadDatasetOptions {
   ipfsElements?: IpfsElements;
   returnJaxrayDataset?: boolean;
   autoConcatenate?: boolean;
+  zarrGroup?: string;
 }
 
 export interface PointQueryOptions {
@@ -71,6 +72,7 @@ export interface DatasetMetadata {
    * Dimension used for concatenation (e.g., "time")
    */
   concatDimension?: string;
+  zarrGroup?: string;
   path: string;
   cid: string;
   /**

@@ -279,6 +279,7 @@ const dataset = await client.loadDataset({
   options: {
     gatewayUrl: "https://custom-gateway.com",  // Optional: override client gateway
     cid: "bafyr4ia...",                         // Optional: load directly from CID
+    zarrGroup: "0",                             // Optional: open a specific Zarr group
     returnJaxrayDataset: false,                 // Optional: return raw jaxray Dataset
     autoConcatenate: true                       // Optional: auto-merge variants (default: false)
   }
@@ -288,6 +289,7 @@ const dataset = await client.loadDataset({
 - **Dataset catalog** – includes both HTTP-backed dataset endpoints and direct CID entries. Use `listAvailableDatasets()` to explore all available datasets.
 - **Gateway** – set `gatewayUrl` on the client constructor or per-call in `loadDataset` options.
 - **Direct CID access** – supply `cid` in options to skip catalog resolution and load directly from IPFS.
+- **Grouped Zarr stores** – set `zarrGroup` when loading grouped sharded Zarr v2 stores such as pyramid level `"0"`.
 
 ### OpenTelemetry
 

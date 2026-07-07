@@ -28,6 +28,11 @@ import {
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 
+function normalizeZarrGroup(group?: string): string | undefined {
+  const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
+  return normalized || undefined;
+}
+
 export class DClimateClient {
   private gatewayUrl: string;
   private stacServerUrl: string | null;
@@ -94,6 +99,7 @@ export class DClimateClient {
   }): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
+    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
 
 
     if (request.cid) {
@@ -101,6 +107,7 @@ export class DClimateClient {
       const dataset = await openDatasetFromCid(request.cid, {
         gatewayUrl,
         ipfsElements,
+        zarrGroup,
       });
 
       const metadata: DatasetMetadata = {
@@ -112,6 +119,7 @@ export class DClimateClient {
         path: "",
         cid: request.cid,
         fetchedAt: new Date(),
+        ...(zarrGroup ? { zarrGroup } : {}),
       };
     if (options.returnJaxrayDataset) {
       return [dataset, metadata];
@@ -235,6 +243,7 @@ export class DClimateClient {
     const dataset = await openDatasetFromCid(cid, {
       gatewayUrl,
       ipfsElements,
+      zarrGroup,
     });
 
     const metadata: DatasetMetadata = {
@@ -246,6 +255,7 @@ export class DClimateClient {
       cid: cid,
       source: "stac",
       fetchedAt: new Date(),
+      ...(zarrGroup ? { zarrGroup } : {}),
     };
 
     if (!metadata.organization && metadata.collection?.includes("_")) {
@@ -287,6 +297,7 @@ export class DClimateClient {
     }
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
+    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
 
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
@@ -295,6 +306,7 @@ export class DClimateClient {
         const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
           ipfsElements,
+          zarrGroup,
         });
 
         return {
@@ -318,6 +330,7 @@ export class DClimateClient {
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "stac_concatenated",
       fetchedAt: new Date(),
+      ...(zarrGroup ? { zarrGroup } : {}),
     };
 
     if (options.returnJaxrayDataset) {
