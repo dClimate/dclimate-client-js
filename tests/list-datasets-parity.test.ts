@@ -55,35 +55,6 @@ function indexByCollection(catalog: DatasetCatalog): Map<string, CatalogCollecti
   return map;
 }
 
-function expectSetContainsAll(
-  superset: Set<string>,
-  subset: Set<string>,
-  label: string
-): void {
-  const missing = [...subset].filter((value) => !superset.has(value)).sort();
-  expect(missing, `${label} missing from STAC server`).toEqual([]);
-}
-
-const MAX_TRANSIENT_VARIANT_MISMATCHES = 2;
-
-function skipExactLiveFieldComparison<T extends { key: string }>(
-  label: string,
-  mismatches: T[],
-  formatMismatch: (mismatch: T) => string
-): boolean {
-  if (mismatches.length <= MAX_TRANSIENT_VARIANT_MISMATCHES) {
-    return false;
-  }
-
-  console.warn(
-    `[parity] ${label} differs in ${mismatches.length} variants. ` +
-      "The live STAC API and IPFS catalog are out of sync, so exact field " +
-      "parity is skipped for this run.\n" +
-      mismatches.slice(0, 10).map(formatMismatch).join("\n"),
-  );
-  return true;
-}
-
 // ── Top-level setup: probe both endpoints and (if reachable) fetch both
 // catalogs in parallel. Runs once when this file loads.
 const [stacReachable, ipfsReachable] = await Promise.all([
@@ -131,10 +102,7 @@ describe("listAvailableDatasets parity (IPFS walker vs STAC server)", () => {
   it.skipIf(!haveBoth)("produces the same set of collection ids", () => {
     const stacIds = new Set(stacCatalog!.map((c) => c.collection));
     const ipfsIds = new Set(ipfsCatalog!.map((c) => c.collection));
-    // The STAC server can expose newly published collections before the IPFS
-    // catalog root pointer catches up. Treat STAC-only entries as a transient
-    // superset, but still fail if anything in IPFS is missing from STAC.
-    expectSetContainsAll(stacIds, ipfsIds, "collections");
+    expect([...stacIds].sort()).toEqual([...ipfsIds].sort());
   });
 
   it.skipIf(!haveBoth)("agrees on organization for each collection", () => {
@@ -174,7 +142,7 @@ describe("listAvailableDatasets parity (IPFS walker vs STAC server)", () => {
       }
     }
 
-    expectSetContainsAll(stacPairs, ipfsPairsWithVariants, "dataset pairs");
+    expect([...stacPairs].sort()).toEqual([...ipfsPairsWithVariants].sort());
   });
 
   it.skipIf(!haveBoth)("produces the same (collection, dataset, variant) triples", () => {
@@ -187,7 +155,7 @@ describe("listAvailableDatasets parity (IPFS walker vs STAC server)", () => {
       }
       return triples;
     };
-    expectSetContainsAll(flatten(stacCatalog!), flatten(ipfsCatalog!), "variant triples");
+    expect([...flatten(stacCatalog!)].sort()).toEqual([...flatten(ipfsCatalog!)].sort());
   });
 
   it.skipIf(!haveBoth)("agrees on CID for each (collection, dataset, variant)", () => {
@@ -212,24 +180,13 @@ describe("listAvailableDatasets parity (IPFS walker vs STAC server)", () => {
       if (stacCid !== ipfsCid) mismatches.push({ key, stac: stacCid, ipfs: ipfsCid });
     }
 
-    // CIDs can transiently disagree if STAC publishes before the IPFS catalog
-    // root pointer catches up. In that state the live sources are not a useful
-    // oracle for exact equality, but the shape checks above still catch missing
-    // collections, datasets, and variants.
-    if (
-      skipExactLiveFieldComparison(
-        "CID",
-        mismatches,
-        (m) => `  ${m.key}\n    STAC:  ${m.stac}\n    IPFS:  ${m.ipfs}`
-      )
-    ) {
-      return;
-    }
-
-    if (mismatches.length > 0) {
+    // CIDs can transiently disagree if the hourly cron republishes between
+    // our two reads. Allow up to 2 to absorb that; anything more is real.
+    if (mismatches.length > 2) {
       throw new Error(
         `CID mismatch in ${mismatches.length} variants:\n` +
           mismatches
+            .slice(0, 10)
             .map((m) => `  ${m.key}\n    STAC:  ${m.stac}\n    IPFS:  ${m.ipfs}`)
             .join("\n"),
       );
@@ -294,22 +251,13 @@ describe("listAvailableDatasets parity (IPFS walker vs STAC server)", () => {
       }
     }
 
-    // Temporal extents can drift with the same STAC-before-IPFS publish lag.
-    if (
-      skipExactLiveFieldComparison(
-        "Temporal extent",
-        mismatches,
-        (m) =>
-          `  ${m.key}\n    STAC:  ${JSON.stringify(m.stac)}\n    IPFS:  ${JSON.stringify(m.ipfs)}`
-      )
-    ) {
-      return;
-    }
-
-    if (mismatches.length > 0) {
+    // Temporal extents can still drift mid-republish on forecast datasets
+    // that update frequently. Allow a tiny tolerance for that case.
+    if (mismatches.length > 2) {
       throw new Error(
         `Temporal extent mismatch in ${mismatches.length} variants:\n` +
           mismatches
+            .slice(0, 10)
             .map(
               (m) =>
                 `  ${m.key}\n    STAC:  ${JSON.stringify(m.stac)}\n    IPFS:  ${JSON.stringify(m.ipfs)}`,
