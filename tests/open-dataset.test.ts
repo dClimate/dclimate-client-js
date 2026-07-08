@@ -36,6 +36,17 @@ describe("openDatasetFromCid", () => {
     expect(openZarrMock).toHaveBeenCalledWith(store);
   });
 
+  it("passes an explicit Zarr group to jaxray", async () => {
+    const store = { kind: "store" };
+    const dataset = { kind: "dataset" };
+    openIpfsStoreMock.mockResolvedValue({ store });
+    openZarrMock.mockResolvedValue(dataset);
+
+    await expect(openDatasetFromCid("bafygrouped", { zarrGroup: "/0/" })).resolves.toBe(dataset);
+
+    expect(openZarrMock).toHaveBeenCalledWith(store, { group: "0" });
+  });
+
   it("uses caller supplied IPFS elements", async () => {
     const ipfsElements = { gatewayUrl: "https://example.invalid" };
     const store = { kind: "custom-store" };

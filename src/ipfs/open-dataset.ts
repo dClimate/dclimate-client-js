@@ -16,6 +16,12 @@ export type IpfsElements = IPFSELEMENTS_INTERFACE;
 export interface OpenDatasetOptions {
   gatewayUrl?: string;
   ipfsElements?: IpfsElements;
+  zarrGroup?: string;
+}
+
+export function normalizeZarrGroup(group?: string): string | undefined {
+  const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
+  return normalized || undefined;
 }
 
 export async function openDatasetFromCid(
@@ -27,6 +33,7 @@ export async function openDatasetFromCid(
   }
 
   const gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
+  const zarrGroup = normalizeZarrGroup(options.zarrGroup);
   const storeType = "JaxrayIpfsStore";
   const datasetStartedAt = performance.now();
   let status: RetrievalStatus = "error";
@@ -36,6 +43,7 @@ export async function openDatasetFromCid(
     {
       "dclimate_client.ipfs.cid": cid,
       "dclimate_client.ipfs.gateway": gatewayUrl,
+      ...(zarrGroup ? { "dclimate_client.ipfs.zarr_group": zarrGroup } : {}),
     },
     async (datasetSpan) => {
       try {
@@ -73,7 +81,9 @@ export async function openDatasetFromCid(
           }
         );
 
-        const dataset = await Dataset.open_zarr(store);
+        const dataset = zarrGroup
+          ? await Dataset.open_zarr(store, { group: zarrGroup })
+          : await Dataset.open_zarr(store);
         status = "ok";
         return dataset;
       } catch (error) {
