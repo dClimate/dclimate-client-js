@@ -108,6 +108,7 @@ export class DClimateClient {
         gatewayUrl,
         ipfsElements,
         zarrGroup,
+        shardReadMode: options.shardReadMode,
       });
 
       const metadata: DatasetMetadata = {
@@ -244,6 +245,7 @@ export class DClimateClient {
       gatewayUrl,
       ipfsElements,
       zarrGroup,
+      shardReadMode: options.shardReadMode,
     });
 
     const metadata: DatasetMetadata = {
