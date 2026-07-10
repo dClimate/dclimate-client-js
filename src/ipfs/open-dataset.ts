@@ -1,6 +1,7 @@
 import { Dataset, openIpfsStore } from "@dclimate/jaxray";
 import type { IPFSELEMENTS_INTERFACE } from "@dclimate/jaxray";
 import { DEFAULT_IPFS_GATEWAY } from "../constants.js";
+import type { ShardReadMode } from "../types.js";
 import {
   classifyRetrievalError,
   recordDatasetOpen,
@@ -17,6 +18,7 @@ export interface OpenDatasetOptions {
   gatewayUrl?: string;
   ipfsElements?: IpfsElements;
   zarrGroup?: string;
+  shardReadMode?: ShardReadMode;
 }
 
 export function normalizeZarrGroup(group?: string): string | undefined {
@@ -34,6 +36,10 @@ export async function openDatasetFromCid(
 
   const gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
   const zarrGroup = normalizeZarrGroup(options.zarrGroup);
+  const ipfsElements = options.ipfsElements ?? { gatewayUrl };
+  const storeOptions = options.shardReadMode
+    ? { ...ipfsElements, shardReadMode: options.shardReadMode }
+    : ipfsElements;
   const storeType = "JaxrayIpfsStore";
   const datasetStartedAt = performance.now();
   let status: RetrievalStatus = "error";
@@ -56,10 +62,7 @@ export async function openDatasetFromCid(
           async (storeSpan) => {
             const storeStartedAt = performance.now();
             try {
-              const openedStore = await openIpfsStore(
-                cid,
-                options.ipfsElements ?? { gatewayUrl }
-              );
+              const openedStore = await openIpfsStore(cid, storeOptions);
               recordStoreOpen({
                 gatewayUrl,
                 storeType,

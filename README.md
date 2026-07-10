@@ -280,6 +280,7 @@ const dataset = await client.loadDataset({
     gatewayUrl: "https://custom-gateway.com",  // Optional: override client gateway
     cid: "bafyr4ia...",                         // Optional: load directly from CID
     zarrGroup: "0",                             // Optional: open a specific Zarr group
+    shardReadMode: "sparse",                    // Optional: decode only requested shard entries
     returnJaxrayDataset: false,                 // Optional: return raw jaxray Dataset
     autoConcatenate: true                       // Optional: auto-merge variants (default: false)
   }
@@ -290,6 +291,7 @@ const dataset = await client.loadDataset({
 - **Gateway** – set `gatewayUrl` on the client constructor or per-call in `loadDataset` options.
 - **Direct CID access** – supply `cid` in options to skip catalog resolution and load directly from IPFS.
 - **Grouped Zarr stores** – set `zarrGroup` when loading grouped sharded Zarr v2 stores such as pyramid level `"0"`.
+- **Sparse shard decoding** – set `shardReadMode: "sparse"` for read-only loads that should decode only the requested shard entry; the default is `"full"`.
 
 ### OpenTelemetry
 

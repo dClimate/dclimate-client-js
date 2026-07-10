@@ -59,6 +59,23 @@ describe("openDatasetFromCid", () => {
     expect(openIpfsStoreMock).toHaveBeenCalledWith("bafycustom", ipfsElements);
   });
 
+  it("forwards sparse shard decoding to jaxray", async () => {
+    const store = { kind: "sparse-store" };
+    const dataset = { kind: "dataset" };
+    openIpfsStoreMock.mockResolvedValue({ store });
+    openZarrMock.mockResolvedValue(dataset);
+
+    await openDatasetFromCid("bafysparse", {
+      ipfsElements: { gatewayUrl: "https://example.invalid" },
+      shardReadMode: "sparse",
+    });
+
+    expect(openIpfsStoreMock).toHaveBeenCalledWith("bafysparse", {
+      gatewayUrl: "https://example.invalid",
+      shardReadMode: "sparse",
+    });
+  });
+
   it("preserves retrieval errors from the store opener", async () => {
     const error = new Error("ETIMEDOUT while opening store");
     openIpfsStoreMock.mockRejectedValue(error);

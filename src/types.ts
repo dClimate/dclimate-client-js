@@ -2,6 +2,8 @@ import type { IPFSELEMENTS_INTERFACE } from "@dclimate/jaxray";
 
 export type IpfsElements = IPFSELEMENTS_INTERFACE;
 
+export type ShardReadMode = "full" | "sparse";
+
 export interface ClientOptions {
   gatewayUrl?: string;
   ipfsElements?: IpfsElements;
@@ -19,6 +21,8 @@ export interface LoadDatasetOptions {
   returnJaxrayDataset?: boolean;
   autoConcatenate?: boolean;
   zarrGroup?: string;
+  /** Read only the requested shard entry on read-only sparse-store cache misses. */
+  shardReadMode?: ShardReadMode;
 }
 
 export interface PointQueryOptions {
