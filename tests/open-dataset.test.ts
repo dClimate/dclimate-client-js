@@ -32,6 +32,7 @@ describe("openDatasetFromCid", () => {
 
     expect(openIpfsStoreMock).toHaveBeenCalledWith("bafytest", {
       gatewayUrl: DEFAULT_IPFS_GATEWAY,
+      shardReadMode: "sparse",
     });
     expect(openZarrMock).toHaveBeenCalledWith(store);
   });
@@ -56,10 +57,30 @@ describe("openDatasetFromCid", () => {
 
     await openDatasetFromCid("bafycustom", { ipfsElements });
 
-    expect(openIpfsStoreMock).toHaveBeenCalledWith("bafycustom", ipfsElements);
+    expect(openIpfsStoreMock).toHaveBeenCalledWith("bafycustom", {
+      ...ipfsElements,
+      shardReadMode: "sparse",
+    });
   });
 
-  it("forwards sparse shard decoding to jaxray", async () => {
+  it("forwards explicit full shard decoding to jaxray", async () => {
+    const store = { kind: "full-store" };
+    const dataset = { kind: "dataset" };
+    openIpfsStoreMock.mockResolvedValue({ store });
+    openZarrMock.mockResolvedValue(dataset);
+
+    await openDatasetFromCid("bafyfull", {
+      ipfsElements: { gatewayUrl: "https://example.invalid" },
+      shardReadMode: "full",
+    });
+
+    expect(openIpfsStoreMock).toHaveBeenCalledWith("bafyfull", {
+      gatewayUrl: "https://example.invalid",
+      shardReadMode: "full",
+    });
+  });
+
+  it("forwards explicit sparse shard decoding to jaxray", async () => {
     const store = { kind: "sparse-store" };
     const dataset = { kind: "dataset" };
     openIpfsStoreMock.mockResolvedValue({ store });

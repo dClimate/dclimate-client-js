@@ -37,9 +37,10 @@ export async function openDatasetFromCid(
   const gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
   const zarrGroup = normalizeZarrGroup(options.zarrGroup);
   const ipfsElements = options.ipfsElements ?? { gatewayUrl };
-  const storeOptions = options.shardReadMode
-    ? { ...ipfsElements, shardReadMode: options.shardReadMode }
-    : ipfsElements;
+  const storeOptions = {
+    ...ipfsElements,
+    shardReadMode: options.shardReadMode ?? "sparse",
+  };
   const storeType = "JaxrayIpfsStore";
   const datasetStartedAt = performance.now();
   let status: RetrievalStatus = "error";

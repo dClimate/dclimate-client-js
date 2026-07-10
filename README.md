@@ -291,7 +291,7 @@ const dataset = await client.loadDataset({
 - **Gateway** – set `gatewayUrl` on the client constructor or per-call in `loadDataset` options.
 - **Direct CID access** – supply `cid` in options to skip catalog resolution and load directly from IPFS.
 - **Grouped Zarr stores** – set `zarrGroup` when loading grouped sharded Zarr v2 stores such as pyramid level `"0"`.
-- **Sparse shard decoding** – set `shardReadMode: "sparse"` for read-only loads that should decode only the requested shard entry; the default is `"full"`.
+- **Sparse shard decoding** – read-only loads use `shardReadMode: "sparse"` by default to decode only requested shard entries. Set `shardReadMode: "full"` for dense reads that should reuse a fully decoded shard cache.
 
 ### OpenTelemetry
 
