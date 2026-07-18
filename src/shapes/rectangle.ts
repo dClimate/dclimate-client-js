@@ -98,19 +98,20 @@ export async function rectangle(
 
   for (let i = 0; i < latArray.length; i++) {
     const lat = latArray[i];
-    if (lat >= minLat && lat <= maxLat) {
-      for (let j = 0; j < lonArray.length; j++) {
-        const lon = lonArray[j];
-        if (lon >= minLon && lon <= maxLon) {
-          selectedLats.push(lat);
-          selectedLons.push(lon);
-        }
-      }
+    if (lat >= minLat && lat <= maxLat && !selectedLats.includes(lat)) {
+      selectedLats.push(lat);
+    }
+  }
+
+  for (let j = 0; j < lonArray.length; j++) {
+    const lon = lonArray[j];
+    if (lon >= minLon && lon <= maxLon && !selectedLons.includes(lon)) {
+      selectedLons.push(lon);
     }
   }
 
   // If no points in rectangle, return empty dataset
-  if (selectedLats.length === 0) {
+  if (selectedLats.length === 0 || selectedLons.length === 0) {
     return new Dataset({});
   }
 
