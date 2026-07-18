@@ -36,11 +36,13 @@ function normalizeZarrGroup(group?: string): string | undefined {
 export class DClimateClient {
   private gatewayUrl: string;
   private stacServerUrl: string | null;
+  private rootCid?: string;
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
   private clientIpfsElements?: IpfsElements;
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
+    this.rootCid = options.rootCid;
     this.clientIpfsElements = options.ipfsElements;
     // stacServerUrl: use provided value, or default if undefined, or null to disable
     this.stacServerUrl =
@@ -52,7 +54,7 @@ export class DClimateClient {
   private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
     // Caching (per-gateway key + TTL) lives in loadStacCatalog's module
     // cache; a second client-level cache only added double-TTL staleness.
-    return loadStacCatalog(gatewayUrl);
+    return loadStacCatalog(gatewayUrl, this.rootCid);
   }
 
   async listAvailableDatasets(): Promise<DatasetCatalog> {

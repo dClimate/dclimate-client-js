@@ -20,6 +20,10 @@ export interface StacServerSearchResponse {
   features: StacServerItem[];
   numberMatched?: number;
   numberReturned?: number;
+  links?: Array<{
+    rel: string;
+    href: string;
+  }>;
 }
 
 export interface StacServerItem {
@@ -36,6 +40,8 @@ export interface ResolvedCidFromServer {
   dataset: string;
   variant: string;
 }
+
+const MAX_STAC_SEARCH_PAGES = 10;
 
 function datasetIdFromItemId(
   itemId: string,
@@ -88,19 +94,30 @@ export async function resolveCidFromStacServer(
     collections: [collection],
   };
 
-  const response = await fetch(`${serverUrl}/search`, {
+  let response = await fetch(`${serverUrl}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`STAC server error ${response.status}: ${text}`);
-  }
+  const features: StacServerItem[] = [];
+  for (let page = 0; page < MAX_STAC_SEARCH_PAGES; page++) {
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`STAC server error ${response.status}: ${text}`);
+    }
 
-  const data: StacServerSearchResponse = await response.json();
-  const features = data.features || [];
+    const data: StacServerSearchResponse = await response.json();
+    features.push(...(data.features || []));
+
+    const nextLink = data.links?.find(
+      (link) => link.rel === "next" && typeof link.href === "string"
+    );
+    if (!nextLink || page === MAX_STAC_SEARCH_PAGES - 1) {
+      break;
+    }
+    response = await fetch(nextLink.href);
+  }
 
   // Filter to the exact dataset. A prefix match would conflate datasets such
   // as precipitation_total and precipitation_total_land.

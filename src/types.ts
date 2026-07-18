@@ -6,6 +6,8 @@ export type ShardReadMode = "full" | "sparse";
 
 export interface ClientOptions {
   gatewayUrl?: string;
+  /** Pin IPFS catalog resolution to a specific root CID. */
+  rootCid?: string;
   ipfsElements?: IpfsElements;
   /**
    * STAC server URL for fast CID resolution.

@@ -67,6 +67,17 @@ export function haversine(
     lon2Arr.length
   );
 
+  const inputArrays = [lat1Arr, lon1Arr, lat2Arr, lon2Arr];
+  if (
+    inputArrays.some(
+      (coordinates) => coordinates.length !== 1 && coordinates.length !== length
+    )
+  ) {
+    throw new RangeError(
+      "Coordinate arrays must have length 1 or share a common length"
+    );
+  }
+
   // Calculate distances for each pair
   const distances = [];
   for (let i = 0; i < length; i++) {

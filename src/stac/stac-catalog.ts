@@ -285,9 +285,11 @@ function createFetchLimiter(limit: number) {
 /**
  * Fetches the root catalog CID from the STAC API endpoint
  */
-export async function getRootCatalogCid(): Promise<string> {
+export async function getRootCatalogCid(
+  endpoint: string = "https://ipfs-gateway.dclimate.net/stac"
+): Promise<string> {
   try {
-    const response = await fetch("https://ipfs-gateway.dclimate.net/stac");
+    const response = await fetch(endpoint);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
