@@ -91,18 +91,44 @@ describe("Shapes Module", () => {
 
     it("should support custom coordinate key names", async () => {
       const dataset2 = new Dataset({
-        temperature: new DataArray([20, 19, 18], {
-          dims: ["y"],
-          coords: { y: [40.0, 40.5, 41.0] },
-        }),
+        temperature: new DataArray(
+          [
+            [20, 19],
+            [18, 17],
+          ],
+          {
+            dims: ["y", "x"],
+            coords: { y: [40.0, 40.5], x: [0, 1] },
+          }
+        ),
       });
 
-      const result = await points(dataset2, [40.0], [0], {
+      const result = await points(dataset2, [40.5], [0], {
         latitudeKey: "y",
         longitudeKey: "x",
       });
 
-      expect(result).toBeDefined();
+      expect(result.getVariable("temperature").data).toEqual([18]);
+    });
+
+    it("should reject coordinate keys missing from the dataset", async () => {
+      await expect(
+        points(dataset, [40.0], [-74.0], {
+          latitudeKey: "lat",
+          longitudeKey: "lon",
+        })
+      ).rejects.toThrow(InvalidSelectionError);
+    });
+
+    it("should reject non-finite point coordinates", async () => {
+      await expect(points(dataset, [NaN], [-74.0])).rejects.toThrow(
+        InvalidSelectionError
+      );
+      await expect(
+        points(dataset, [40.0], [undefined as unknown as number], {
+          snapToGrid: false,
+        })
+      ).rejects.toThrow(InvalidSelectionError);
     });
 
     it("should throw error if EPSG CRS transformation requested", async () => {

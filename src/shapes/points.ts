@@ -103,11 +103,28 @@ export async function points(
     throw new InvalidSelectionError("At least one point coordinate is required");
   }
 
+  for (let index = 0; index < pointLats.length; index++) {
+    if (
+      !Number.isFinite(pointLats[index]) ||
+      !Number.isFinite(pointLons[index])
+    ) {
+      throw new InvalidSelectionError(
+        `Point coordinates must be finite numbers (got latitude ${pointLats[index]}, longitude ${pointLons[index]} at index ${index})`
+      );
+    }
+  }
+
   // TODO: Add CRS transformation if epsgCrs !== 4326
   // For now, assuming input is already in EPSG:4326 (WGS84)
   if (epsgCrs !== 4326) {
     throw new InvalidSelectionError(
       "CRS transformation not yet implemented. Please provide coordinates in EPSG:4326"
+    );
+  }
+
+  if (!dataset.coords[latitudeKey] || !dataset.coords[longitudeKey]) {
+    throw new InvalidSelectionError(
+      `Latitude (${latitudeKey}) and/or longitude (${longitudeKey}) coordinates not found in dataset`
     );
   }
 
