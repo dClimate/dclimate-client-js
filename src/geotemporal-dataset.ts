@@ -43,6 +43,21 @@ const DEFAULT_TIME_KEYS = [
   "t",
 ];
 
+function toTimelineValue(value: CoordinateValue): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : value instanceof Date
+        ? value.getTime()
+        : Date.parse(value);
+
+  if (!Number.isFinite(parsed)) {
+    throw new TypeError(`Unable to parse time value "${String(value)}"`);
+  }
+
+  return parsed;
+}
+
 export class GeoTemporalDataset {
   constructor(
     private readonly dataset: Dataset,
@@ -179,9 +194,10 @@ export class GeoTemporalDataset {
     range: TimeRange,
     dimension = "time",
   ): Promise<GeoTemporalDataset> {
-    const candidateKeys = Array.from(
-      new Set([dimension, ...DEFAULT_TIME_KEYS]),
-    ).filter(Boolean) as string[];
+    const candidateKeys =
+      dimension === "time"
+        ? Array.from(new Set(DEFAULT_TIME_KEYS))
+        : [dimension];
     const timeKey = this.inferCoordinateKey(candidateKeys);
 
     if (!timeKey) {
@@ -208,15 +224,50 @@ export class GeoTemporalDataset {
       );
     }
 
+    let startTime: number;
+    let endTime: number;
+    let matchingIndices: number[];
+    try {
+      startTime = toTimelineValue(normalizedRange.start);
+      endTime = toTimelineValue(normalizedRange.end);
+      const lowerBound = Math.min(startTime, endTime);
+      const upperBound = Math.max(startTime, endTime);
+      matchingIndices = coords.reduce<number[]>((indices, coordinate, index) => {
+        const coordinateTime = toTimelineValue(coordinate);
+        if (coordinateTime >= lowerBound && coordinateTime <= upperBound) {
+          indices.push(index);
+        }
+        return indices;
+      }, []);
+    } catch (error) {
+      throw new InvalidSelectionError(
+        `Unable to compare time range on "${timeKey}": ${String(
+          (error as Error).message ?? error,
+        )}`,
+      );
+    }
+
+    if (matchingIndices.length === 0) {
+      throw new NoDataFoundError(
+        `No data found in the requested time range on "${timeKey}".`,
+      );
+    }
+
     let subset: Dataset;
     try {
-      const selection: Selection = {
-        [timeKey]: {
-          start: normalizedRange.start,
-          stop: normalizedRange.end,
-        },
-      };
-      subset = await this.dataset.sel(selection);
+      if (typeof this.dataset.isel === "function") {
+        subset = await this.dataset.isel({ [timeKey]: matchingIndices });
+      } else {
+        // Preserve compatibility with lightweight Dataset fakes that only
+        // implement sel, while still passing exact coordinate endpoints.
+        const selection: Selection = {
+          [timeKey]: {
+            start: coords[matchingIndices[0]],
+            stop: coords[matchingIndices[matchingIndices.length - 1]],
+          },
+        };
+        subset = await this.dataset.sel(selection);
+      }
     } catch (error) {
       throw new InvalidSelectionError(
         `Failed to apply time range on "${timeKey}": ${String(
