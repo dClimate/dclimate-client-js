@@ -322,93 +322,107 @@ export async function loadStacCatalog(
 
     const catalog: StacCatalog = await catalogResponse.json();
 
-    const organizations: StacOrganization[] = [];
-    const collections: StacCollection[] = [];
     const orgLinks = catalog.links.filter(
       (link) => link.rel === "child" && typeof link?.["dclimate:id"] === "string"
     );
 
-    for (const link of orgLinks) {
-      const orgId = link["dclimate:id"] as string;
-      const orgUrl = resolveIpfsUri(link.href, gatewayUrl);
-      const collectionCategories = buildCollectionCategoryMap(link);
-      const datasetSlugs = extractDatasetSlugsFromOrgLink(link);
+    const organizationResults = await Promise.all(
+      orgLinks.map(async (link) => {
+        const orgId = link["dclimate:id"] as string;
+        const orgUrl = resolveIpfsUri(link.href, gatewayUrl);
+        const collectionCategories = buildCollectionCategoryMap(link);
+        const datasetSlugs = extractDatasetSlugsFromOrgLink(link);
 
-      try {
-        const orgResponse = await fetch(orgUrl);
-        if (!orgResponse.ok) {
-          console.warn(`Failed to load organization catalog from ${link.href}: ${orgResponse.status}`);
-          continue;
-        }
+        try {
+          const orgResponse = await fetch(orgUrl);
+          if (!orgResponse.ok) {
+            console.warn(`Failed to load organization catalog from ${link.href}: ${orgResponse.status}`);
+            return undefined;
+          }
 
-        const orgCatalog: StacCatalog = await orgResponse.json();
-        organizations.push({
-          id: orgId,
-          title: link.title,
-          link,
-          catalog: orgCatalog,
-        });
-
-        const collectionLinks = orgCatalog.links.filter((orgLink) => orgLink.rel === "child");
-
-        for (const collectionLink of collectionLinks) {
-          try {
-            const collectionUrl = resolveIpfsUri(collectionLink.href, gatewayUrl);
-            const collectionResponse = await fetch(collectionUrl);
-
-            if (!collectionResponse.ok) {
-              console.warn(`Failed to load collection from ${collectionLink.href}: ${collectionResponse.status}`);
-              continue;
-            }
-
-            const collection: StacCollection = await collectionResponse.json();
-
-            // Load items for this collection
-            const items: StacItem[] = [];
-            const itemLinks = collection.links.filter((itemLink) => itemLink.rel === "item");
-
-            for (const itemLink of itemLinks) {
+          const orgCatalog: StacCatalog = await orgResponse.json();
+          const organization: StacOrganization = {
+            id: orgId,
+            title: link.title,
+            link,
+            catalog: orgCatalog,
+          };
+          const collectionLinks = orgCatalog.links.filter((orgLink) => orgLink.rel === "child");
+          const collectionResults = await Promise.all(
+            collectionLinks.map(async (collectionLink) => {
               try {
-                const itemUrl = resolveIpfsUri(itemLink.href, gatewayUrl);
-                const itemResponse = await fetch(itemUrl);
+                const collectionUrl = resolveIpfsUri(collectionLink.href, gatewayUrl);
+                const collectionResponse = await fetch(collectionUrl);
 
-                if (!itemResponse.ok) {
-                  console.warn(`Failed to load item from ${itemLink.href}: ${itemResponse.status}`);
-                  continue;
+                if (!collectionResponse.ok) {
+                  console.warn(`Failed to load collection from ${collectionLink.href}: ${collectionResponse.status}`);
+                  return undefined;
                 }
 
-                const item: StacItem = await itemResponse.json();
-                items.push(item);
-              } catch (itemError) {
-                console.warn(`Error loading item ${itemLink.href}:`, itemError);
+                const collection: StacCollection = await collectionResponse.json();
+
+                // Load items for this collection
+                const itemLinks = collection.links.filter((itemLink) => itemLink.rel === "item");
+                const itemResults = await Promise.all(
+                  itemLinks.map(async (itemLink) => {
+                    try {
+                      const itemUrl = resolveIpfsUri(itemLink.href, gatewayUrl);
+                      const itemResponse = await fetch(itemUrl);
+
+                      if (!itemResponse.ok) {
+                        console.warn(`Failed to load item from ${itemLink.href}: ${itemResponse.status}`);
+                        return undefined;
+                      }
+
+                      return await itemResponse.json() as StacItem;
+                    } catch (itemError) {
+                      console.warn(`Error loading item ${itemLink.href}:`, itemError);
+                      return undefined;
+                    }
+                  })
+                );
+
+                collection.items = itemResults.filter((item): item is StacItem => item !== undefined);
+                collection.organizationId = orgId;
+                collection.organizationTitle = link.title;
+                const category = collectionCategories.get(collection.id);
+                if (category) {
+                  collection.category = category;
+                }
+
+                const datasetNames = datasetSlugs
+                  .filter((slug) => slug.startsWith(`${collection.id}/`))
+                  .map((slug) => slug.split("/")[1])
+                  .filter(Boolean);
+                if (datasetNames.length) {
+                  collection.datasetNames = datasetNames;
+                }
+
+                return collection;
+              } catch (collectionError) {
+                console.warn(`Error loading collection ${collectionLink.href}:`, collectionError);
+                return undefined;
               }
-            }
+            })
+          );
 
-            collection.items = items;
-            collection.organizationId = orgId;
-            collection.organizationTitle = link.title;
-            const category = collectionCategories.get(collection.id);
-            if (category) {
-              collection.category = category;
-            }
-
-            const datasetNames = datasetSlugs
-              .filter((slug) => slug.startsWith(`${collection.id}/`))
-              .map((slug) => slug.split("/")[1])
-              .filter(Boolean);
-            if (datasetNames.length) {
-              collection.datasetNames = datasetNames;
-            }
-
-            collections.push(collection);
-          } catch (collectionError) {
-            console.warn(`Error loading collection ${collectionLink.href}:`, collectionError);
-          }
+          return {
+            organization,
+            collections: collectionResults.filter(
+              (collection): collection is StacCollection => collection !== undefined
+            ),
+          };
+        } catch (orgError) {
+          console.warn(`Error loading organization ${link.href}:`, orgError);
+          return undefined;
         }
-      } catch (orgError) {
-        console.warn(`Error loading organization ${link.href}:`, orgError);
-      }
-    }
+      })
+    );
+    const loadedOrganizations = organizationResults.filter(
+      (result): result is NonNullable<typeof result> => result !== undefined
+    );
+    const organizations = loadedOrganizations.map(({ organization }) => organization);
+    const collections = loadedOrganizations.flatMap((result) => result.collections);
 
     catalog.collections = collections;
     catalog.organizations = organizations;
