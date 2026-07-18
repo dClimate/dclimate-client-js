@@ -167,7 +167,7 @@ export class DClimateClient {
           catalog,
           resolvedCollection || request.collection || "",
           request.dataset,
-          request.variant,
+          concatenableItems[0].variant,
           resolvedOrganization
         );
         const resolvedOrganizationId =
