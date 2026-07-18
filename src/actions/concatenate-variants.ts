@@ -43,6 +43,10 @@ export async function concatenateVariants(
 
   // Start with the first dataset (highest priority)
   let combined = sorted[0].dataset;
+  const comparableCoords = new WeakMap<
+    Array<string | number | Date>,
+    Float64Array
+  >();
 
   // Concatenate each subsequent variant
   for (let i = 1; i < sorted.length; i++) {
@@ -57,7 +61,11 @@ export async function concatenateVariants(
       );
     }
 
-    const lastCombinedCoord = combinedCoords[combinedCoords.length - 1];
+    const lastCombinedCoord = getComparableCoord(
+      combinedCoords,
+      combinedCoords.length - 1,
+      comparableCoords
+    );
 
     // Get coordinates from the next dataset
     const nextCoords = nextDataset.coords[concatDim];
@@ -68,7 +76,11 @@ export async function concatenateVariants(
     }
 
     // Find the index in nextDataset where coords start AFTER lastCombinedCoord
-    const splitIndex = findSplitIndex(nextCoords, lastCombinedCoord);
+    const splitIndex = findSplitIndex(
+      nextCoords,
+      lastCombinedCoord,
+      comparableCoords
+    );
 
     if (splitIndex === -1 || splitIndex >= nextCoords.length) {
       // No new data in this variant, skip it
@@ -80,7 +92,10 @@ export async function concatenateVariants(
 
     // Slice the next dataset to only include data after the split point
     const slicedNext = await nextDataset.isel({
-      [concatDim]: Array.from({ length: nextCoords.length - splitIndex }, (_, i) => splitIndex + i)
+      [concatDim]: Array.from(
+        { length: nextCoords.length - splitIndex },
+        (_, i) => splitIndex + i
+      )
     });
 
     // Concatenate with the combined dataset
@@ -92,27 +107,63 @@ export async function concatenateVariants(
 
 /**
  * Find the index where coordinates start AFTER the given value
- * Handles both numeric and Date coordinates
+ * Handles numeric, string, and Date coordinates
  *
  * @param coords - Array of coordinate values
- * @param afterValue - Value to find the split point after
- * @returns Index of first coordinate > afterValue, or -1 if none found
+ * @param afterComparable - Comparable value to find the split point after
+ * @returns Index of first coordinate > afterComparable, or -1 if none found
  */
 function findSplitIndex(
   coords: Array<string | number | Date>,
-  afterValue: string | number | Date
+  afterComparable: number,
+  comparableCoords: WeakMap<
+    Array<string | number | Date>,
+    Float64Array
+  >
 ): number {
-  // Convert to comparable values
-  const afterComparable = toComparable(afterValue);
+  let start = 0;
+  let end = coords.length;
 
-  for (let i = 0; i < coords.length; i++) {
-    const coordComparable = toComparable(coords[i]);
-    if (coordComparable > afterComparable) {
-      return i;
+  while (start < end) {
+    const midpoint = start + Math.floor((end - start) / 2);
+    if (
+      getComparableCoord(coords, midpoint, comparableCoords) > afterComparable
+    ) {
+      end = midpoint;
+    } else {
+      start = midpoint + 1;
     }
   }
 
-  return -1; // No coordinate found after afterValue
+  return start < coords.length ? start : -1;
+}
+
+/**
+ * Get a coordinate's comparable value, parsing each visited coordinate at most once.
+ */
+function getComparableCoord(
+  coords: Array<string | number | Date>,
+  index: number,
+  comparableCoords: WeakMap<
+    Array<string | number | Date>,
+    Float64Array
+  >
+): number {
+  let cachedCoords = comparableCoords.get(coords);
+  if (!cachedCoords) {
+    cachedCoords = new Float64Array(coords.length);
+    cachedCoords.fill(Number.NaN);
+    comparableCoords.set(coords, cachedCoords);
+  }
+
+  const cached = cachedCoords[index];
+  if (!Number.isNaN(cached)) {
+    return cached;
+  }
+
+  const comparable = toComparable(coords[index]);
+  cachedCoords[index] = comparable;
+  return comparable;
 }
 
 /**
