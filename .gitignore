@@ -3,3 +3,4 @@ dist
 *.log
 mnemonic.txt
 .env
+.tdd-logs/
