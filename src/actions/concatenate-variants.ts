@@ -75,12 +75,38 @@ export async function concatenateVariants(
       );
     }
 
+    // The split below binary-searches, which requires ascending coordinates
+    // (as decoded zarr time axes are). Cheap first/last probes catch
+    // descending axes rather than silently dropping their data.
+    const firstNextCoord = getComparableCoord(nextCoords, 0, comparableCoords);
+    const lastNextCoord = getComparableCoord(
+      nextCoords,
+      nextCoords.length - 1,
+      comparableCoords
+    );
+    if (firstNextCoord > lastNextCoord) {
+      throw new Error(
+        `Variant '${nextVariant.variant.variant}' has descending '${concatDim}' coordinates; concatenation requires ascending order`
+      );
+    }
+
     // Find the index in nextDataset where coords start AFTER lastCombinedCoord
     const splitIndex = findSplitIndex(
       nextCoords,
       lastCombinedCoord,
       comparableCoords
     );
+
+    if (
+      (splitIndex === -1 || splitIndex >= nextCoords.length) &&
+      lastNextCoord > lastCombinedCoord
+    ) {
+      // The search saw only coords <= the coverage end yet the final coord
+      // is beyond it — the axis is not sorted ascending.
+      throw new Error(
+        `Variant '${nextVariant.variant.variant}' has unsorted '${concatDim}' coordinates; concatenation requires ascending order`
+      );
+    }
 
     if (splitIndex === -1 || splitIndex >= nextCoords.length) {
       // No new data in this variant, skip it

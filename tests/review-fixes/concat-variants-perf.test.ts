@@ -107,12 +107,44 @@ describe("concatenateVariants overlap splitting", () => {
     );
 
     const startedAt = performance.now();
-    await concatenateVariants([highPriority, lowPriority]);
+    const result = await concatenateVariants([highPriority, lowPriority]);
     const durationMs = performance.now() - startedAt;
 
     expect(
       durationMs,
       `concatenateVariants took ${durationMs.toFixed(1)}ms for two 30,000-step variants`,
     ).toBeLessThan(250);
+
+    // Output shape must be right too — a fast-but-wrong split (e.g. one that
+    // skips the low-priority variant entirely) must not pass on speed alone.
+    const resultValues = (await result.getVariable("value").compute()).values;
+    expect(resultValues).toHaveLength(stepCount + overlapStart);
+    expect(resultValues[stepCount - 1]).toBe(1_000_000 + stepCount - 1);
+    expect(resultValues[stepCount]).toBe(2_000_000 + overlapStart);
   }, 30_000);
+
+  it("throws on descending time coordinates instead of dropping data", async () => {
+    const highPriority = createVariant("asc", 0, START_TIME, DAY_MS, 3, 1_000);
+    const descendingTime = [4, 3, 2].map((day) =>
+      new Date(START_TIME + day * DAY_MS).toISOString(),
+    );
+    const lowPriority: VariantToLoad = {
+      variant: {
+        variant: "desc",
+        cid: "bafy-desc",
+        concatPriority: 1,
+        concatDimension: "time",
+      },
+      dataset: new Dataset({
+        value: new DataArray([2_000, 2_001, 2_002], {
+          dims: ["time"],
+          coords: { time: descendingTime },
+        }),
+      }),
+    };
+
+    await expect(
+      concatenateVariants([highPriority, lowPriority]),
+    ).rejects.toThrow(/descending 'time' coordinates/);
+  });
 });
