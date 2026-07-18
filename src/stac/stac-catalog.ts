@@ -255,6 +255,29 @@ function buildCollectionCategoryMap(link: StacLink): Map<string, string> {
   return map;
 }
 
+// Cap on simultaneous gateway requests during the catalog walk. Uncapped
+// fan-out fires every leaf at once (~139 documents on the real catalog);
+// throttled responses would be warn-skipped and cached as a silently
+// partial catalog for the TTL.
+const MAX_CONCURRENT_CATALOG_FETCHES = 12;
+
+function createFetchLimiter(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async function run<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= limit) {
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
+    active++;
+    try {
+      return await task();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
 // ============================================================================
 // Core STAC Functions
 // ============================================================================
@@ -326,6 +349,10 @@ export async function loadStacCatalog(
       (link) => link.rel === "child" && typeof link?.["dclimate:id"] === "string"
     );
 
+    // The limiter guards only the fetch itself (not whole mapper bodies), so
+    // a parent level never holds a slot while awaiting its children.
+    const limitedFetch = createFetchLimiter(MAX_CONCURRENT_CATALOG_FETCHES);
+
     const organizationResults = await Promise.all(
       orgLinks.map(async (link) => {
         const orgId = link["dclimate:id"] as string;
@@ -333,26 +360,40 @@ export async function loadStacCatalog(
         const collectionCategories = buildCollectionCategoryMap(link);
         const datasetSlugs = extractDatasetSlugsFromOrgLink(link);
 
+        let organization: StacOrganization;
         try {
-          const orgResponse = await fetch(orgUrl);
+          const orgResponse = await limitedFetch(() => fetch(orgUrl));
           if (!orgResponse.ok) {
             console.warn(`Failed to load organization catalog from ${link.href}: ${orgResponse.status}`);
             return undefined;
           }
 
           const orgCatalog: StacCatalog = await orgResponse.json();
-          const organization: StacOrganization = {
+          organization = {
             id: orgId,
             title: link.title,
             link,
             catalog: orgCatalog,
           };
-          const collectionLinks = orgCatalog.links.filter((orgLink) => orgLink.rel === "child");
+        } catch (orgError) {
+          console.warn(`Error loading organization ${link.href}:`, orgError);
+          return undefined;
+        }
+
+        // A parsed org whose collection listing is malformed or fails still
+        // appears in catalog.organizations with zero collections, matching
+        // the pre-parallelization walk.
+        try {
+          const collectionLinks = organization.catalog.links.filter(
+            (orgLink) => orgLink.rel === "child"
+          );
           const collectionResults = await Promise.all(
             collectionLinks.map(async (collectionLink) => {
               try {
                 const collectionUrl = resolveIpfsUri(collectionLink.href, gatewayUrl);
-                const collectionResponse = await fetch(collectionUrl);
+                const collectionResponse = await limitedFetch(() =>
+                  fetch(collectionUrl)
+                );
 
                 if (!collectionResponse.ok) {
                   console.warn(`Failed to load collection from ${collectionLink.href}: ${collectionResponse.status}`);
@@ -367,7 +408,9 @@ export async function loadStacCatalog(
                   itemLinks.map(async (itemLink) => {
                     try {
                       const itemUrl = resolveIpfsUri(itemLink.href, gatewayUrl);
-                      const itemResponse = await fetch(itemUrl);
+                      const itemResponse = await limitedFetch(() =>
+                        fetch(itemUrl)
+                      );
 
                       if (!itemResponse.ok) {
                         console.warn(`Failed to load item from ${itemLink.href}: ${itemResponse.status}`);
@@ -414,7 +457,7 @@ export async function loadStacCatalog(
           };
         } catch (orgError) {
           console.warn(`Error loading organization ${link.href}:`, orgError);
-          return undefined;
+          return { organization, collections: [] };
         }
       })
     );

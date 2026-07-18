@@ -106,7 +106,11 @@ function buildCatalogFixture(gatewayUrl: string) {
   return { collections, documents };
 }
 
-function stubDelayedCatalogFetch(gatewayUrl: string, failingUrls = new Set<string>()) {
+function stubDelayedCatalogFetch(
+  gatewayUrl: string,
+  failingUrls = new Set<string>(),
+  throwingUrls = new Set<string>(),
+) {
   const fixture = buildCatalogFixture(gatewayUrl);
   let inFlight = 0;
   let maxConcurrency = 0;
@@ -119,6 +123,9 @@ function stubDelayedCatalogFetch(gatewayUrl: string, failingUrls = new Set<strin
     await new Promise((resolve) => setTimeout(resolve, 15));
     inFlight -= 1;
 
+    if (throwingUrls.has(url)) {
+      throw new TypeError("fetch failed");
+    }
     if (failingUrls.has(url)) {
       return response({ error: "Synthetic failure" }, 500);
     }
@@ -143,15 +150,16 @@ function expectCompleteTraversal(
   catalog: Awaited<ReturnType<typeof loadStacCatalog>>,
   expectedCollections: CollectionExpectation[],
 ) {
-  expect(catalog.collections).toHaveLength(expectedCollections.length);
-  expect(catalog.collections?.map(({ id }) => id).sort()).toEqual(
-    expectedCollections.map(({ collectionId }) => collectionId).sort(),
+  // Exact order: the parallel walk must preserve link order (org-major,
+  // collection link order, item link order), not just set equality.
+  expect(catalog.collections?.map(({ id }) => id)).toEqual(
+    expectedCollections.map(({ collectionId }) => collectionId),
   );
 
   for (const expected of expectedCollections) {
     const collection = catalog.collections?.find(({ id }) => id === expected.collectionId);
     expect(collection?.organizationId).toBe(expected.organizationId);
-    expect(collection?.items?.map(({ id }) => id).sort()).toEqual([...expected.itemIds].sort());
+    expect(collection?.items?.map(({ id }) => id)).toEqual(expected.itemIds);
   }
 }
 
@@ -168,6 +176,9 @@ describe("loadStacCatalog IPFS walk", () => {
     await loadStacCatalog(gatewayUrl);
 
     expect(fixture.getMaxConcurrency()).toBeGreaterThanOrEqual(4);
+    // The walk caps simultaneous gateway requests so throttled responses
+    // can't be warn-skipped into a silently partial cached catalog.
+    expect(fixture.getMaxConcurrency()).toBeLessThanOrEqual(12);
   });
 
   it("attaches every item and organization id to all traversed collections", async () => {
@@ -202,5 +213,62 @@ describe("loadStacCatalog IPFS walk", () => {
             : collection.itemIds,
       }));
     expectCompleteTraversal(catalog, expectedCollections);
+  });
+
+  it("continues past thrown fetch failures at every level", async () => {
+    const gatewayUrl = "https://catalog-walk-thrown-errors.test";
+    const fixture = buildCatalogFixture(gatewayUrl);
+    // Org 0 throws entirely; one collection and one item of org 1 throw.
+    const orgUrl = `${gatewayUrl}/ipfs/bafy-organization-0`;
+    const org1Collections = fixture.collections.filter(
+      ({ organizationId }) => organizationId === "organization-1",
+    );
+    const thrownCollection = org1Collections[0];
+    const collectionWithThrownItem = org1Collections.at(-1)!;
+    const thrownItemUrl = collectionWithThrownItem.itemUrls[0];
+    const thrownItemId = collectionWithThrownItem.itemIds[0];
+    const throwingUrls = new Set([orgUrl, thrownCollection.url, thrownItemUrl]);
+    stubDelayedCatalogFetch(gatewayUrl, new Set(), throwingUrls);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const catalog = await loadStacCatalog(gatewayUrl);
+
+    const expectedCollections = org1Collections
+      .filter(({ collectionId }) => collectionId !== thrownCollection.collectionId)
+      .map((collection) => ({
+        ...collection,
+        itemIds:
+          collection.collectionId === collectionWithThrownItem.collectionId
+            ? collection.itemIds.filter((itemId) => itemId !== thrownItemId)
+            : collection.itemIds,
+      }));
+    expectCompleteTraversal(catalog, expectedCollections);
+    expect(catalog.organizations?.map(({ id }) => id)).toEqual(["organization-1"]);
+  });
+
+  it("keeps an organization whose collection listing is malformed", async () => {
+    const gatewayUrl = "https://catalog-walk-malformed-links.test";
+    const fixture = stubDelayedCatalogFetch(gatewayUrl);
+    // Replace org 0's catalog with one whose links field is not an array.
+    fixture.documents.set(`${gatewayUrl}/ipfs/bafy-organization-0`, {
+      type: "Catalog",
+      stac_version: "1.0.0",
+      id: "organization-0",
+      links: null,
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const catalog = await loadStacCatalog(gatewayUrl);
+
+    // The parsed org survives with zero collections, as in the serial walk.
+    expect(catalog.organizations?.map(({ id }) => id)).toEqual([
+      "organization-0",
+      "organization-1",
+    ]);
+    expect(catalog.collections?.map(({ id }) => id)).toEqual(
+      fixture.collections
+        .filter(({ organizationId }) => organizationId === "organization-1")
+        .map(({ collectionId }) => collectionId),
+    );
   });
 });
