@@ -286,7 +286,9 @@ describe("Shapes Module", () => {
       // Create a dense grid of points centered at (40.0, -74.0)
       const centerLat = 40.0;
       const centerLon = -74.0;
-      const radiusKm = 10;
+      // 0.1° of latitude is ~11.12 km, so the radius must exceed that for the
+      // circle to span rows above and below the center.
+      const radiusKm = 12;
 
       const latitudes = Array.from({ length: 21 }, (_, i) => 39.0 + (i * 0.1)); // 39.0 to 41.0
       const longitudes = Array.from({ length: 21 }, (_, i) => -75.0 + (i * 0.1)); // -75.0 to -73.0
