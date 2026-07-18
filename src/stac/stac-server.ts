@@ -23,6 +23,9 @@ export interface StacServerSearchResponse {
   links?: Array<{
     rel: string;
     href: string;
+    method?: string;
+    body?: Record<string, unknown>;
+    merge?: boolean;
   }>;
 }
 
@@ -111,12 +114,32 @@ export async function resolveCidFromStacServer(
     features.push(...(data.features || []));
 
     const nextLink = data.links?.find(
-      (link) => link.rel === "next" && typeof link.href === "string"
+      (link) =>
+        typeof link === "object" &&
+        link !== null &&
+        link.rel === "next" &&
+        typeof link.href === "string"
     );
     if (!nextLink || page === MAX_STAC_SEARCH_PAGES - 1) {
       break;
     }
-    response = await fetch(nextLink.href);
+
+    // STAC API pagination: next links may be plain GET hrefs, or POST links
+    // carrying a token body (the dClimate server's shape) that must be
+    // re-POSTed — optionally merged with the original search body.
+    const nextUrl = new URL(nextLink.href, serverUrl).toString();
+    if ((nextLink.method ?? "GET").toUpperCase() === "POST") {
+      const nextBody = nextLink.merge
+        ? { ...body, ...(nextLink.body ?? {}) }
+        : nextLink.body ?? body;
+      response = await fetch(nextUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nextBody),
+      });
+    } else {
+      response = await fetch(nextUrl);
+    }
   }
 
   // Filter to the exact dataset. A prefix match would conflate datasets such

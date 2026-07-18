@@ -141,15 +141,23 @@ export function classifyRetrievalError(error: unknown): RetrievalStatus {
       message.includes("timed out") ||
       message.includes("ECONNREFUSED") ||
       message.includes("ETIMEDOUT") ||
-      /fetch failed|failed to fetch/i.test(message)
+      // Anchored: undici throws exactly "fetch failed", browsers exactly
+      // "Failed to fetch" — a substring match over-classifies messages that
+      // merely mention a failed fetch.
+      /^fetch failed$|^failed to fetch$/i.test(message.trim())
     ) {
       return "connection_error";
     }
 
-    current =
-      typeof current === "object" && current !== null && "cause" in current
-        ? (current as { cause?: unknown }).cause
-        : undefined;
+    try {
+      current =
+        typeof current === "object" && current !== null && "cause" in current
+          ? (current as { cause?: unknown }).cause
+          : undefined;
+    } catch {
+      // A throwing cause getter must not escape a metrics classifier.
+      current = undefined;
+    }
   }
   return "error";
 }

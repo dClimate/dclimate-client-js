@@ -6,7 +6,10 @@ export type ShardReadMode = "full" | "sparse";
 
 export interface ClientOptions {
   gatewayUrl?: string;
-  /** Pin IPFS catalog resolution to a specific root CID. */
+  /**
+   * Pin catalog resolution to a specific root CID. Also disables the STAC
+   * server fast path, which only serves the latest catalog version.
+   */
   rootCid?: string;
   ipfsElements?: IpfsElements;
   /**

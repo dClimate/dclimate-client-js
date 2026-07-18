@@ -44,9 +44,12 @@ export class DClimateClient {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
     this.rootCid = options.rootCid;
     this.clientIpfsElements = options.ipfsElements;
-    // stacServerUrl: use provided value, or default if undefined, or null to disable
+    // stacServerUrl: use provided value, or default if undefined, or null to
+    // disable. A pinned rootCid also disables the server path — the server
+    // only serves the latest catalog, so consulting it would silently bypass
+    // the pinned version (and contact public infrastructure).
     this.stacServerUrl =
-      options.stacServerUrl === null
+      options.stacServerUrl === null || options.rootCid
         ? null
         : options.stacServerUrl ?? DEFAULT_STAC_SERVER_URL;
   }

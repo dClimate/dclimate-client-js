@@ -71,4 +71,57 @@ describe("resolveCidFromStacServer pagination", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]?.[0]?.toString()).toBe(nextPageUrl);
   });
+
+  it("re-POSTs token-style next links as the production server requires", async () => {
+    // The dClimate STAC server paginates with
+    // {rel: "next", method: "POST", href: ".../search", body: {limit, token}}.
+    const allFeatures = Array.from({ length: 150 }, (_, index) =>
+      feature(index),
+    );
+    const token = "next:bigcoll:100";
+    const postBodies: unknown[] = [];
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const url = input instanceof Request ? input.url : input.toString();
+        expect(url).toBe(`${serverUrl}/search`);
+        const parsedBody = init?.body
+          ? JSON.parse(init.body as string)
+          : undefined;
+        postBodies.push(parsedBody);
+        const isNextPage = parsedBody?.token === token;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            type: "FeatureCollection",
+            features: isNextPage
+              ? allFeatures.slice(100)
+              : allFeatures.slice(0, 100),
+            links: isNextPage
+              ? []
+              : [
+                  // Null entries must be tolerated, not crash the walk.
+                  null,
+                  {
+                    rel: "next",
+                    method: "POST",
+                    href: `${serverUrl}/search`,
+                    body: { limit: 100, token },
+                  },
+                ],
+          }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(collection, targetDataset, undefined, serverUrl),
+    ).resolves.toMatchObject({ cid: "bafy-page-item-119" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(postBodies[1]).toEqual({ limit: 100, token });
+  });
 });

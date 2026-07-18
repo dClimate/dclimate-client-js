@@ -192,5 +192,32 @@ describe("root catalog CID discovery", () => {
       `${gatewayUrl}/ipfs/${pinnedRootCid}`,
     );
     expect(requestedUrls).not.toContain(publicDiscoveryEndpoint);
+
+    vi.unstubAllGlobals();
+    fetchMock.mockClear();
+    vi.stubGlobal("fetch", fetchMock);
+
+    // A pinned client must not consult the STAC server either — it serves
+    // only the latest catalog, silently bypassing the pin. Same fixture, but
+    // WITHOUT stacServerUrl: null: no request may leave the private gateway.
+    const pinnedDefaultServerClient = new DClimateClient({
+      gatewayUrl,
+      rootCid: pinnedRootCid,
+      ipfsElements: {} as IpfsElements,
+    } as unknown as ClientOptions);
+
+    await expect(
+      pinnedDefaultServerClient.loadDataset({
+        request: { organization, collection: "weather", dataset },
+        options: { returnJaxrayDataset: true },
+      }),
+    ).resolves.toBeDefined();
+
+    const pinnedUrls = fetchMock.mock.calls.map(([input]) =>
+      requestUrl(input),
+    );
+    for (const url of pinnedUrls) {
+      expect.soft(url.startsWith(gatewayUrl)).toBe(true);
+    }
   });
 });
