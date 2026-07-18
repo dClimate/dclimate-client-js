@@ -633,48 +633,53 @@ export function getConcatenableItemsFromStac(
   // Find all items matching the dataset pattern
   const matchingItems: ConcatenableStacItem[] = [];
 
+  // Item IDs follow {collection}-{dataset}-{variant}. Strip the resolved
+  // collection id as a prefix (mirroring resolveDatasetFromStac) so
+  // collection and dataset names containing hyphens still match.
+  const collectionPrefix = `${resolvedCollectionId}-`;
+
   for (const item of collectionObj.items || []) {
-    // Parse item ID: expected format is {collection}-{dataset}-{variant}
-    const parts = item.id.split("-");
-    if (parts.length < 2) continue;
+    if (!item.id.startsWith(collectionPrefix)) continue;
+    const remainder = item.id.slice(collectionPrefix.length);
 
-    const itemCollection = parts[0];
-    const itemDataset = parts[1];
-    const itemVariant = parts.slice(2).join("-") || "default";
-
-    // Check if this item matches our dataset
-    if (itemCollection === resolvedCollectionId && itemDataset === dataset) {
-      // Check for concatenation metadata in properties
-      // Also check in link metadata (fallback)
-      const itemLink = collectionObj.links.find(
-        (link) =>
-          link.rel === "item" && link?.["dclimate:id"] === item.id
-      );
-
-      // Variants without an explicit concatPriority have not opted into
-      // auto-concatenation (see DatasetVariantConfig) and must be excluded.
-      const priority =
-        getNumberProperty(item.properties, "dclimate:concatPriority") ??
-        getNumberProperty(itemLink, "dclimate:concatPriority");
-      if (priority === undefined) continue;
-      const dimension =
-        getStringProperty(item.properties, "dclimate:concatDimension") ??
-        getStringProperty(itemLink, "dclimate:concatDimension") ??
-        "time";
-
-      // Extract CID from assets
-      const dataAsset = item.assets.data;
-      if (!dataAsset) continue;
-
-      const cid = dataAsset.href.replace(/^ipfs:\/\//, "");
-
-      matchingItems.push({
-        variant: itemVariant,
-        cid,
-        concatPriority: priority,
-        concatDimension: dimension,
-      });
+    if (remainder !== dataset && !remainder.startsWith(`${dataset}-`)) {
+      continue;
     }
+    const itemVariant =
+      remainder === dataset
+        ? "default"
+        : remainder.slice(dataset.length + 1) || "default";
+
+    // Check for concatenation metadata in properties
+    // Also check in link metadata (fallback)
+    const itemLink = collectionObj.links.find(
+      (link) =>
+        link.rel === "item" && link?.["dclimate:id"] === item.id
+    );
+
+    // Variants without an explicit concatPriority have not opted into
+    // auto-concatenation (see DatasetVariantConfig) and must be excluded.
+    const priority =
+      getNumberProperty(item.properties, "dclimate:concatPriority") ??
+      getNumberProperty(itemLink, "dclimate:concatPriority");
+    if (priority === undefined) continue;
+    const dimension =
+      getStringProperty(item.properties, "dclimate:concatDimension") ??
+      getStringProperty(itemLink, "dclimate:concatDimension") ??
+      "time";
+
+    // Extract CID from assets
+    const dataAsset = item.assets.data;
+    if (!dataAsset) continue;
+
+    const cid = dataAsset.href.replace(/^ipfs:\/\//, "");
+
+    matchingItems.push({
+      variant: itemVariant,
+      cid,
+      concatPriority: priority,
+      concatDimension: dimension,
+    });
   }
 
   return matchingItems;
