@@ -130,7 +130,6 @@ export interface StacCatalog {
 interface CatalogCacheEntry {
   catalog: StacCatalog;
   timestamp: number;
-  rootCid: string;
 }
 
 export function getStringProperty(
@@ -184,7 +183,9 @@ export interface ResolvedDatasetFromStac {
 const catalogCache: Map<string, CatalogCacheEntry> = new Map();
 
 function getCatalogCacheKey(gatewayUrl: string, rootCid?: string): string {
-  return `stac:${gatewayUrl}:${rootCid ?? "latest"}`;
+  // `||` (not ??) so an empty-string rootCid shares the latest slot, matching
+  // loadStacCatalog's `rootCid || getRootCatalogCid()` resolution.
+  return `stac:${gatewayUrl}:${rootCid || "latest"}`;
 }
 
 function getCachedCatalog(
@@ -208,15 +209,13 @@ function getCachedCatalog(
 
 function setCachedCatalog(
   gatewayUrl: string,
-  cacheRootCid: string | undefined,
-  catalog: StacCatalog,
-  rootCid: string
+  rootCid: string | undefined,
+  catalog: StacCatalog
 ): void {
-  const key = getCatalogCacheKey(gatewayUrl, cacheRootCid);
+  const key = getCatalogCacheKey(gatewayUrl, rootCid);
   catalogCache.set(key, {
     catalog,
     timestamp: Date.now(),
-    rootCid,
   });
 }
 
@@ -414,7 +413,7 @@ export async function loadStacCatalog(
     catalog.collections = collections;
     catalog.organizations = organizations;
 
-    setCachedCatalog(gatewayUrl, rootCid, catalog, cid);
+    setCachedCatalog(gatewayUrl, rootCid, catalog);
 
     return catalog;
   } catch (error) {
