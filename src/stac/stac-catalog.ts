@@ -183,8 +183,16 @@ export interface ResolvedDatasetFromStac {
 
 const catalogCache: Map<string, CatalogCacheEntry> = new Map();
 
-function getCachedCatalog(gatewayUrl: string, ttlMs: number): StacCatalog | null {
-  const key = `stac:${gatewayUrl}`;
+function getCatalogCacheKey(gatewayUrl: string, rootCid?: string): string {
+  return `stac:${gatewayUrl}:${rootCid ?? "latest"}`;
+}
+
+function getCachedCatalog(
+  gatewayUrl: string,
+  rootCid: string | undefined,
+  ttlMs: number
+): StacCatalog | null {
+  const key = getCatalogCacheKey(gatewayUrl, rootCid);
   const entry = catalogCache.get(key);
 
   if (!entry) return null;
@@ -198,8 +206,13 @@ function getCachedCatalog(gatewayUrl: string, ttlMs: number): StacCatalog | null
   return entry.catalog;
 }
 
-function setCachedCatalog(gatewayUrl: string, catalog: StacCatalog, rootCid: string): void {
-  const key = `stac:${gatewayUrl}`;
+function setCachedCatalog(
+  gatewayUrl: string,
+  cacheRootCid: string | undefined,
+  catalog: StacCatalog,
+  rootCid: string
+): void {
+  const key = getCatalogCacheKey(gatewayUrl, cacheRootCid);
   catalogCache.set(key, {
     catalog,
     timestamp: Date.now(),
@@ -292,7 +305,7 @@ export async function loadStacCatalog(
   const cacheTtl = 3600000; // 1 hour
 
   // Check cache first
-  const cached = getCachedCatalog(gatewayUrl, cacheTtl);
+  const cached = getCachedCatalog(gatewayUrl, rootCid, cacheTtl);
   if (cached) {
     return cached;
   }
@@ -401,7 +414,7 @@ export async function loadStacCatalog(
     catalog.collections = collections;
     catalog.organizations = organizations;
 
-    setCachedCatalog(gatewayUrl, catalog, cid);
+    setCachedCatalog(gatewayUrl, rootCid, catalog, cid);
 
     return catalog;
   } catch (error) {
