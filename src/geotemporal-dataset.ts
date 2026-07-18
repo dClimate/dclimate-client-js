@@ -15,7 +15,11 @@ import {
   GeoSelectionOptions,
   PointQueryOptions,
 } from "./types.js";
-import { normalizeTimeRange, normalizeSegment } from "./utils.js";
+import {
+  isDatasetEmpty,
+  normalizeTimeRange,
+  normalizeSegment,
+} from "./utils.js";
 import {
   points as pointsShape,
   circle as circleShape,
@@ -138,8 +142,7 @@ export class GeoTemporalDataset {
   }
 
   isEmpty(): boolean {
-    const sizes = this.dataset.sizes;
-    return Object.values(sizes).some((size) => size === 0);
+    return isDatasetEmpty(this.dataset);
   }
 
   ensureHasData() {
