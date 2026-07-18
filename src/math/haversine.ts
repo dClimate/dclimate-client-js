@@ -1,3 +1,5 @@
+export const EARTH_RADIUS_KM = 6371;
+
 /**
  * Calculates arclength distance in km between coordinate pairs,
  * assuming the earth is a perfect sphere.
@@ -38,8 +40,6 @@ export function haversine(
     const absA = Math.abs(a);
     const c = 2 * Math.asin(Math.sqrt(absA));
 
-    // Radius of Earth in km
-    const EARTH_RADIUS_KM = 6371;
     return c * EARTH_RADIUS_KM;
   };
 

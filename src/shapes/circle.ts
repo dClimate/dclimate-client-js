@@ -4,11 +4,11 @@ import {
   flatten,
   type DataValue,
 } from "@dclimate/jaxray";
-import { haversine } from "../math/haversine.js";
+import { EARTH_RADIUS_KM, haversine } from "../math/haversine.js";
 import { InvalidSelectionError } from "../errors.js";
 
-const KILOMETERS_PER_DEGREE = 111.32;
-const MIN_LONGITUDE_COSINE = 1e-6;
+const DEGREES_PER_RADIAN = 180 / Math.PI;
+const BBOX_EPSILON_DEGREES = 1e-9;
 
 function contiguousIndices(start: number, end: number): number[] {
   return Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
@@ -17,6 +17,10 @@ function contiguousIndices(start: number, end: number): number[] {
 function enclosingRange(indices: number[]): number[] {
   if (indices.length === 0) return [];
   return contiguousIndices(indices[0], indices[indices.length - 1]);
+}
+
+function angularDifferenceDegrees(longitude: number, center: number): number {
+  return ((longitude - center + 180) % 360 + 360) % 360 - 180;
 }
 
 function transposeTo(variable: DataArray, targetDims: string[]): DataArray {
@@ -134,32 +138,41 @@ export async function circle(
     return coordinate;
   });
 
-  const latitudeDelta = radiusKm / KILOMETERS_PER_DEGREE;
-  const latitudeMin = centerLat - latitudeDelta;
-  const latitudeMax = centerLat + latitudeDelta;
+  const angularRadiusRadians = radiusKm / EARTH_RADIUS_KM;
+  const latitudeDelta = angularRadiusRadians * DEGREES_PER_RADIAN;
+  const reachesNorthPole =
+    latitudeDelta + BBOX_EPSILON_DEGREES >= 90 - centerLat;
+  const reachesSouthPole =
+    latitudeDelta + BBOX_EPSILON_DEGREES >= 90 + centerLat;
+  const reachesPole = reachesNorthPole || reachesSouthPole;
+  const latitudeMin = reachesSouthPole
+    ? -90
+    : centerLat - latitudeDelta - BBOX_EPSILON_DEGREES;
+  const latitudeMax = reachesNorthPole
+    ? 90
+    : centerLat + latitudeDelta + BBOX_EPSILON_DEGREES;
   const bboxLatitudeIndices = latArray
     .map((latitude, index) => ({ latitude, index }))
     .filter(({ latitude }) => latitude >= latitudeMin && latitude <= latitudeMax)
     .map(({ index }) => index);
 
   const centerLatitudeRadians = (centerLat * Math.PI) / 180;
-  const longitudeCosine = Math.max(
-    Math.abs(Math.cos(centerLatitudeRadians)),
-    MIN_LONGITUDE_COSINE
-  );
-  const longitudeDelta =
-    radiusKm / (KILOMETERS_PER_DEGREE * longitudeCosine);
-  const longitudeMin = centerLon - longitudeDelta;
-  const longitudeMax = centerLon + longitudeDelta;
+  const longitudeExtentRatio =
+    Math.sin(angularRadiusRadians) /
+    Math.abs(Math.cos(centerLatitudeRadians));
   const useFullLongitudeRange =
-    longitudeDelta >= 180 || longitudeMin < -180 || longitudeMax > 180;
+    reachesPole || longitudeExtentRatio >= 1;
+  const longitudeDelta = useFullLongitudeRange
+    ? 180
+    : Math.asin(longitudeExtentRatio) * DEGREES_PER_RADIAN;
   const bboxLongitudeIndices = useFullLongitudeRange
     ? contiguousIndices(0, lonArray.length - 1)
     : lonArray
         .map((longitude, index) => ({ longitude, index }))
         .filter(
           ({ longitude }) =>
-            longitude >= longitudeMin && longitude <= longitudeMax
+            Math.abs(angularDifferenceDegrees(longitude, centerLon)) <=
+            longitudeDelta + BBOX_EPSILON_DEGREES
         )
         .map(({ index }) => index);
 
@@ -168,13 +181,12 @@ export async function circle(
   }
 
   const bboxLatitudeRange = enclosingRange(bboxLatitudeIndices);
-  const bboxLongitudeRange = enclosingRange(bboxLongitudeIndices);
   const bboxDataset = await dataset.isel({
     [latitudeKey]: bboxLatitudeRange,
-    [longitudeKey]: bboxLongitudeRange,
+    [longitudeKey]: bboxLongitudeIndices,
   });
   const bboxLatitudes = bboxLatitudeRange.map((index) => latArray[index]);
-  const bboxLongitudes = bboxLongitudeRange.map((index) => lonArray[index]);
+  const bboxLongitudes = bboxLongitudeIndices.map((index) => lonArray[index]);
 
   const bboxMask = bboxLatitudes.map((latitude) =>
     bboxLongitudes.map(
@@ -210,33 +222,35 @@ export async function circle(
       (longitudeIndex) => bboxMask[latitudeIndex][longitudeIndex]
     )
   );
-  const maskArray = new DataArray(trimmedMask, {
-    dims: [latitudeKey, longitudeKey],
-    coords: {
-      [latitudeKey]: trimmedDataset.coords[latitudeKey],
-      [longitudeKey]: trimmedDataset.coords[longitudeKey],
-    },
-  });
-
   // jaxray cannot apply where to lazy operands, so materialize only after both
   // spatial selections have reduced the dataset to the mask-derived trim.
   const materialized = await trimmedDataset.compute();
-  const conditionVariables: Record<string, DataArray> = {};
+  const maskedVariables: Record<string, DataArray> = {};
   for (const name of materialized.dataVars) {
     const variable = materialized.getVariable(name);
-    conditionVariables[name] =
+    if (
       variable.dims.includes(latitudeKey) &&
       variable.dims.includes(longitudeKey)
-        ? maskArray
-        : new DataArray(true);
+    ) {
+      const variableMask = new DataArray(trimmedMask, {
+        dims: [latitudeKey, longitudeKey],
+        coords: {
+          [latitudeKey]: variable.coords[latitudeKey],
+          [longitudeKey]: variable.coords[longitudeKey],
+        },
+      });
+      maskedVariables[name] = variable.where(variableMask, null, {
+        keepAttrs: true,
+      });
+    } else {
+      maskedVariables[name] = variable;
+    }
   }
-  const masked = materialized.where(new Dataset(conditionVariables));
 
   // where puts condition dimensions first. Restore the input order for every
   // variable (for example, time/latitude/longitude).
   const resultVariables: Record<string, DataArray> = {};
-  for (const name of masked.dataVars) {
-    const variable = masked.getVariable(name);
+  for (const [name, variable] of Object.entries(maskedVariables)) {
     resultVariables[name] = transposeTo(
       variable,
       materialized.getVariable(name).dims
@@ -244,7 +258,7 @@ export async function circle(
   }
 
   return new Dataset(resultVariables, {
-    attrs: masked.attrs,
-    coordAttrs: masked.coordAttrs,
+    attrs: materialized.attrs,
+    coordAttrs: materialized.coordAttrs,
   });
 }
