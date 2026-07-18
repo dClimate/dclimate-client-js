@@ -1,6 +1,8 @@
 import {
+  cfTimeToDate,
   Dataset,
   DataArray,
+  parseCFTimeUnits,
   type CoordinateValue,
   type Selection,
 } from "@dclimate/jaxray";
@@ -12,7 +14,6 @@ import {
   DatasetObject,
   GeoSelectionOptions,
   PointQueryOptions,
-  TimeRange,
 } from "./types.js";
 import { normalizeTimeRange, normalizeSegment } from "./utils.js";
 import {
@@ -43,19 +44,50 @@ const DEFAULT_TIME_KEYS = [
   "t",
 ];
 
+type TimeRangeInput = {
+  start: CoordinateValue;
+  end: CoordinateValue;
+};
+
 function toTimelineValue(value: CoordinateValue): number {
+  let normalizedValue = value;
+  if (typeof value === "string") {
+    const trimmedValue = value.trim();
+    const hasTime =
+      /[tT]/.test(trimmedValue) || /\s\d{1,2}:\d{2}/.test(trimmedValue);
+    const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmedValue);
+    normalizedValue =
+      hasTime && !hasTimezone ? `${trimmedValue}Z` : trimmedValue;
+  }
+
   const parsed =
-    typeof value === "number"
-      ? value
-      : value instanceof Date
-        ? value.getTime()
-        : Date.parse(value);
+    typeof normalizedValue === "number"
+      ? normalizedValue
+      : normalizedValue instanceof Date
+      ? normalizedValue.getTime()
+      : Date.parse(normalizedValue);
 
   if (!Number.isFinite(parsed)) {
     throw new TypeError(`Unable to parse time value "${String(value)}"`);
   }
 
   return parsed;
+}
+
+function cfTimeToTimelineValue(
+  value: number,
+  units: string,
+  calendar?: string,
+): number {
+  const date = cfTimeToDate(value, units, calendar);
+  if (!date) {
+    throw new TypeError(
+      `Unable to convert CF time value "${String(
+        value,
+      )}" using units "${units}"`,
+    );
+  }
+  return date.getTime();
 }
 
 export class GeoTemporalDataset {
@@ -191,7 +223,7 @@ export class GeoTemporalDataset {
   }
 
   async timeRange(
-    range: TimeRange,
+    range: TimeRangeInput,
     dimension = "time",
   ): Promise<GeoTemporalDataset> {
     const candidateKeys =
@@ -213,32 +245,85 @@ export class GeoTemporalDataset {
       );
     }
 
-    let normalizedRange: { start: CoordinateValue; end: CoordinateValue };
-    try {
-      normalizedRange = normalizeTimeRange(range, coords);
-    } catch (error) {
-      throw new InvalidSelectionError(
-        `Unable to normalize time range: ${String(
-          (error as Error).message ?? error,
-        )}`,
-      );
-    }
-
     let startTime: number;
     let endTime: number;
     let matchingIndices: number[];
     try {
-      startTime = toTimelineValue(normalizedRange.start);
-      endTime = toTimelineValue(normalizedRange.end);
+      let coordinateToTimelineValue: (coordinate: CoordinateValue) => number;
+      if (typeof coords[0] === "number") {
+        const timeAttrs = this.dataset.coordAttrs?.[timeKey];
+        const units =
+          typeof timeAttrs?.units === "string" ? timeAttrs.units : undefined;
+        const calendar =
+          typeof timeAttrs?.calendar === "string"
+            ? timeAttrs.calendar
+            : undefined;
+
+        if (units) {
+          if (!parseCFTimeUnits(units)) {
+            throw new TypeError(`Invalid CF time units "${units}"`);
+          }
+          const endpointToTimelineValue = (value: CoordinateValue): number =>
+            typeof value === "number"
+              ? cfTimeToTimelineValue(value, units, calendar)
+              : toTimelineValue(value);
+          startTime = endpointToTimelineValue(range.start);
+          endTime = endpointToTimelineValue(range.end);
+          coordinateToTimelineValue = (coordinate) => {
+            if (typeof coordinate !== "number") {
+              throw new TypeError(
+                "Numeric time axis contains a non-numeric value",
+              );
+            }
+            return cfTimeToTimelineValue(coordinate, units, calendar);
+          };
+        } else {
+          if (
+            typeof range.start !== "number" ||
+            typeof range.end !== "number"
+          ) {
+            throw new TypeError(
+              "Numeric time coordinates without CF units require numeric range endpoints",
+            );
+          }
+          startTime = toTimelineValue(range.start);
+          endTime = toTimelineValue(range.end);
+          coordinateToTimelineValue = (coordinate) => {
+            if (typeof coordinate !== "number") {
+              throw new TypeError(
+                "Numeric time axis contains a non-numeric value",
+              );
+            }
+            return toTimelineValue(coordinate);
+          };
+        }
+      } else {
+        if (typeof range.start === "number" || typeof range.end === "number") {
+          throw new TypeError(
+            "Non-numeric time coordinates require date-like range endpoints",
+          );
+        }
+        const normalizedRange = normalizeTimeRange(
+          { start: range.start, end: range.end },
+          coords,
+        );
+        startTime = toTimelineValue(normalizedRange.start);
+        endTime = toTimelineValue(normalizedRange.end);
+        coordinateToTimelineValue = toTimelineValue;
+      }
+
       const lowerBound = Math.min(startTime, endTime);
       const upperBound = Math.max(startTime, endTime);
-      matchingIndices = coords.reduce<number[]>((indices, coordinate, index) => {
-        const coordinateTime = toTimelineValue(coordinate);
-        if (coordinateTime >= lowerBound && coordinateTime <= upperBound) {
-          indices.push(index);
-        }
-        return indices;
-      }, []);
+      matchingIndices = coords.reduce<number[]>(
+        (indices, coordinate, index) => {
+          const coordinateTime = coordinateToTimelineValue(coordinate);
+          if (coordinateTime >= lowerBound && coordinateTime <= upperBound) {
+            indices.push(index);
+          }
+          return indices;
+        },
+        [],
+      );
     } catch (error) {
       throw new InvalidSelectionError(
         `Unable to compare time range on "${timeKey}": ${String(
