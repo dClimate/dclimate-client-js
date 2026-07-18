@@ -302,6 +302,7 @@ export class DClimateClient {
           gatewayUrl,
           ipfsElements,
           zarrGroup,
+          shardReadMode: options.shardReadMode,
         });
 
         return {
