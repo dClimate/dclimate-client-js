@@ -623,7 +623,7 @@ export function getConcatenableItemsFromStac(
   dataset: string,
   organization?: string
 ): ConcatenableStacItem[] {
-  const { collection: collectionObj } = selectCollectionFromCatalog(
+  const { collection: collectionObj, resolvedCollectionId } = selectCollectionFromCatalog(
     catalog,
     collection,
     dataset,
@@ -643,7 +643,7 @@ export function getConcatenableItemsFromStac(
     const itemVariant = parts.slice(2).join("-") || "default";
 
     // Check if this item matches our dataset
-    if (itemCollection === collection && itemDataset === dataset) {
+    if (itemCollection === resolvedCollectionId && itemDataset === dataset) {
       // Check for concatenation metadata in properties
       // Also check in link metadata (fallback)
       const itemLink = collectionObj.links.find(
