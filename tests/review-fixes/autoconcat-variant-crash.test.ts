@@ -44,10 +44,10 @@ describe("loadDataset auto-concatenation", () => {
   beforeEach(() => {
     openDatasetFromCidMock.mockReset();
     openDatasetFromCidMock.mockImplementation(async (cid: string) => {
-      if (cid === "bafy-part1-data") {
+      if (cid === "bafy-part2-data") {
         return createDataset(cid, ["2024-01-01T00:00:00Z"]);
       }
-      if (cid === "bafy-part2-data") {
+      if (cid === "bafy-part1-data") {
         return createDataset(cid, ["2024-01-02T00:00:00Z"]);
       }
       throw new Error(`Unexpected dataset CID: ${cid}`);
@@ -107,7 +107,9 @@ describe("loadDataset auto-concatenation", () => {
           stac_version: "1.0.0",
           id: `${collection}-${dataset}-part1`,
           properties: {
-            "dclimate:concatPriority": 0,
+            // part1 is listed first in the collection but has the LOWER
+            // priority rank second, so discovery order != priority order.
+            "dclimate:concatPriority": 1,
             "dclimate:concatDimension": "time",
           },
           geometry: null,
@@ -122,7 +124,7 @@ describe("loadDataset auto-concatenation", () => {
           stac_version: "1.0.0",
           id: `${collection}-${dataset}-part2`,
           properties: {
-            "dclimate:concatPriority": 1,
+            "dclimate:concatPriority": 0,
             "dclimate:concatDimension": "time",
           },
           geometry: null,
@@ -177,6 +179,9 @@ describe("loadDataset auto-concatenation", () => {
       "2024-01-01T00:00:00Z",
       "2024-01-02T00:00:00Z",
     ]);
-    expect(metadata.concatenatedVariants).toEqual(["part1", "part2"]);
+    // Priority order (part2 has priority 0), not catalog discovery order.
+    expect(metadata.concatenatedVariants).toEqual(["part2", "part1"]);
+    expect(metadata.cid).toBe("bafy-part2-data");
+    expect(metadata.concatDimension).toBe("time");
   });
 });

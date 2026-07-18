@@ -301,9 +301,15 @@ export class DClimateClient {
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
     const zarrGroup = normalizeZarrGroup(options.zarrGroup);
 
+    // Order by concatPriority so metadata (concatenatedVariants, cid)
+    // reflects the same order the data is concatenated in.
+    const orderedVariants = [...concatVariants].sort(
+      (a, b) => a.concatPriority - b.concatPriority
+    );
+
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
-      concatVariants.map(async (variantConfig) => {
+      orderedVariants.map(async (variantConfig) => {
         // Load the dataset using the CID from STAC
         const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
@@ -327,7 +333,8 @@ export class DClimateClient {
       dataset: request.dataset,
       collection: request.collection,
       organization: request.organization,
-      concatenatedVariants: concatVariants.map((v) => v.variant),
+      concatenatedVariants: orderedVariants.map((v) => v.variant),
+      concatDimension: orderedVariants[0].concatDimension,
       path: pathParts.join("-"),
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "stac_concatenated",

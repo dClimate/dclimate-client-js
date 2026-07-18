@@ -90,4 +90,16 @@ describe("getConcatenableItemsFromStac collection resolution", () => {
       getConcatenableItemsFromStac(catalog, "era5", dataset, organization),
     ).toEqual(expected);
   });
+
+  it("excludes variants without an explicit concatPriority", () => {
+    const catalog = createCatalog();
+    const collectionObj = catalog.collections![0];
+    for (const item of collectionObj.items ?? []) {
+      delete item.properties["dclimate:concatPriority"];
+    }
+
+    expect(
+      getConcatenableItemsFromStac(catalog, collection, dataset, organization),
+    ).toEqual([]);
+  });
 });

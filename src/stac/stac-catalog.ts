@@ -651,10 +651,12 @@ export function getConcatenableItemsFromStac(
           link.rel === "item" && link?.["dclimate:id"] === item.id
       );
 
+      // Variants without an explicit concatPriority have not opted into
+      // auto-concatenation (see DatasetVariantConfig) and must be excluded.
       const priority =
         getNumberProperty(item.properties, "dclimate:concatPriority") ??
-        getNumberProperty(itemLink, "dclimate:concatPriority") ??
-        0;
+        getNumberProperty(itemLink, "dclimate:concatPriority");
+      if (priority === undefined) continue;
       const dimension =
         getStringProperty(item.properties, "dclimate:concatDimension") ??
         getStringProperty(itemLink, "dclimate:concatDimension") ??
