@@ -39,11 +39,6 @@ export class DClimateClient {
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
   private clientIpfsElements?: IpfsElements;
-  private stacCatalog?: StacCatalog;
-  private stacCatalogGateway?: string;
-  private stacCatalogTimestamp?: number;
-  private stacCacheTtl: number = 3600000; // 1 hour
-
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
     this.clientIpfsElements = options.ipfsElements;
@@ -55,23 +50,9 @@ export class DClimateClient {
   }
 
   private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
-    // Check if cached catalog is still valid
-    if (
-      this.stacCatalog &&
-      this.stacCatalogGateway === gatewayUrl &&
-      this.stacCatalogTimestamp
-    ) {
-      const age = Date.now() - this.stacCatalogTimestamp;
-      if (age < this.stacCacheTtl) {
-        return this.stacCatalog;
-      }
-    }
-
-    // Load fresh catalog
-    this.stacCatalog = await loadStacCatalog(gatewayUrl);
-    this.stacCatalogGateway = gatewayUrl;
-    this.stacCatalogTimestamp = Date.now();
-    return this.stacCatalog;
+    // Caching (per-gateway key + TTL) lives in loadStacCatalog's module
+    // cache; a second client-level cache only added double-TTL staleness.
+    return loadStacCatalog(gatewayUrl);
   }
 
   async listAvailableDatasets(): Promise<DatasetCatalog> {
