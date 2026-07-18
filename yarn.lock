@@ -2,10 +2,9 @@
 # yarn lockfile v1
 
 
-"@dclimate/jaxray@^0.6.11":
+"@dclimate/jaxray@github:dClimate/jaxray#review/tdd-followups":
   version "0.6.11"
-  resolved "https://registry.yarnpkg.com/@dclimate/jaxray/-/jaxray-0.6.11.tgz#beaf32f9e515d05e407f7b067e3196d4462c3804"
-  integrity sha512-0+sN5gzBcZXTtPtTTRYofN53DZ40pMEXWfO/ZHqlZ7I64mH6elwKytuctP+wmOvJlCr6nbKsMJRONlIf2+hbHQ==
+  resolved "https://codeload.github.com/dClimate/jaxray/tar.gz/94b4baacedcd6c2696cb0e0167e0f8d93cc4c09c"
   dependencies:
     "@ipld/dag-cbor" "^9.2.5"
     "@noble/ciphers" "^2.0.1"
