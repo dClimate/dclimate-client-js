@@ -72,6 +72,67 @@ describe("resolveCidFromStacServer pagination", () => {
     expect(fetchMock.mock.calls[1]?.[0]?.toString()).toBe(nextPageUrl);
   });
 
+  it("resolves a relative next link against the /search endpoint, not the server root", async () => {
+    const allFeatures = Array.from({ length: 150 }, (_, index) =>
+      feature(index),
+    );
+    // A bare query-string href must resolve against the request URL
+    // (`${serverUrl}/search`), yielding `.../search?token=abc`. Resolving it
+    // against the server root would wrongly target `.../?token=abc`.
+    const relativeNext = "?token=abc";
+    const expectedNextUrl = `${serverUrl}/search?token=abc`;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      const isNextPage = url === expectedNextUrl;
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({
+          type: "FeatureCollection",
+          features: isNextPage
+            ? allFeatures.slice(100)
+            : allFeatures.slice(0, 100),
+          links: isNextPage ? [] : [{ rel: "next", href: relativeNext }],
+        }),
+        text: async () => "",
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(collection, targetDataset, undefined, serverUrl),
+    ).resolves.toMatchObject({ cid: "bafy-page-item-119" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]?.toString()).toBe(expectedNextUrl);
+  });
+
+  it("surfaces truncation instead of silently returning a partial page set", async () => {
+    // Every page advertises another next link, so the walk can never terminate
+    // naturally. Rather than silently truncating (and reporting the target as
+    // missing), it must throw so callers can fall back to the full catalog.
+    const fetchMock = vi.fn(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            type: "FeatureCollection",
+            features: [feature(0)],
+            links: [{ rel: "next", href: `${serverUrl}/search?page=next` }],
+          }),
+          text: async () => "",
+        }) as Response,
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(collection, targetDataset, undefined, serverUrl),
+    ).rejects.toThrow(/truncated/);
+  });
+
   it("re-POSTs token-style next links as the production server requires", async () => {
     // The dClimate STAC server paginates with
     // {rel: "next", method: "POST", href: ".../search", body: {limit, token}}.

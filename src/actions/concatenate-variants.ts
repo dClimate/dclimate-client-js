@@ -75,40 +75,20 @@ export async function concatenateVariants(
       );
     }
 
-    // The split below binary-searches, which requires ascending coordinates
-    // (as decoded zarr time axes are). Cheap first/last probes catch
-    // descending axes rather than silently dropping their data.
-    const firstNextCoord = getComparableCoord(nextCoords, 0, comparableCoords);
-    const lastNextCoord = getComparableCoord(
-      nextCoords,
-      nextCoords.length - 1,
-      comparableCoords
-    );
-    if (firstNextCoord > lastNextCoord) {
-      throw new Error(
-        `Variant '${nextVariant.variant.variant}' has descending '${concatDim}' coordinates; concatenation requires ascending order`
-      );
-    }
-
-    // Find the index in nextDataset where coords start AFTER lastCombinedCoord
+    // Find the first index in nextDataset whose coordinate is AFTER
+    // lastCombinedCoord. The scan validates ascending order across every
+    // adjacent pair — endpoint-only probes cannot see interior disorder
+    // (e.g. [4, 1, 5]) and would let a binary search silently drop valid
+    // coordinates.
     const splitIndex = findSplitIndex(
       nextCoords,
       lastCombinedCoord,
-      comparableCoords
+      comparableCoords,
+      nextVariant.variant.variant,
+      concatDim
     );
 
-    if (
-      (splitIndex === -1 || splitIndex >= nextCoords.length) &&
-      lastNextCoord > lastCombinedCoord
-    ) {
-      // The search saw only coords <= the coverage end yet the final coord
-      // is beyond it — the axis is not sorted ascending.
-      throw new Error(
-        `Variant '${nextVariant.variant.variant}' has unsorted '${concatDim}' coordinates; concatenation requires ascending order`
-      );
-    }
-
-    if (splitIndex === -1 || splitIndex >= nextCoords.length) {
+    if (splitIndex === -1) {
       // No new data in this variant, skip it
       console.warn(
         `Variant '${nextVariant.variant.variant}' has no data after the previous variant, skipping concatenation`
@@ -132,12 +112,22 @@ export async function concatenateVariants(
 }
 
 /**
- * Find the index where coordinates start AFTER the given value
- * Handles numeric, string, and Date coordinates
+ * Find the index where coordinates start AFTER the given value. Handles
+ * numeric, string, and Date coordinates.
  *
- * @param coords - Array of coordinate values
- * @param afterComparable - Comparable value to find the split point after
+ * Comparing a coordinate can be costly — decoded time axes may be long ISO-8601
+ * strings whose parse dominates runtime. The strategy therefore depends on how
+ * expensive comparison is:
+ *
+ *   - Numeric / Date axes are O(1) to compare, so scan every coordinate and
+ *     validate ascending order as we go. This rejects the interior disorder
+ *     (e.g. [4, 1, 5]) that a binary search silently skips past, dropping data.
+ *   - String axes route to a binary search that touches only O(log n)
+ *     coordinates, trusting the monotonicity that decoded zarr axes guarantee.
+ *     Cheap endpoint probes still catch a fully descending axis.
+ *
  * @returns Index of first coordinate > afterComparable, or -1 if none found
+ * @throws If the axis is detected to be non-ascending
  */
 function findSplitIndex(
   coords: Array<string | number | Date>,
@@ -145,11 +135,89 @@ function findSplitIndex(
   comparableCoords: WeakMap<
     Array<string | number | Date>,
     Float64Array
-  >
+  >,
+  variantName: string,
+  concatDim: string
 ): number {
+  return typeof coords[0] === "string"
+    ? findSplitIndexBinary(
+        coords,
+        afterComparable,
+        comparableCoords,
+        variantName,
+        concatDim
+      )
+    : findSplitIndexScanning(
+        coords,
+        afterComparable,
+        comparableCoords,
+        variantName,
+        concatDim
+      );
+}
+
+/**
+ * Full linear scan for cheap-to-compare axes: validates ascending order across
+ * every adjacent pair and returns the first index whose coordinate exceeds
+ * afterComparable.
+ */
+function findSplitIndexScanning(
+  coords: Array<string | number | Date>,
+  afterComparable: number,
+  comparableCoords: WeakMap<Array<string | number | Date>, Float64Array>,
+  variantName: string,
+  concatDim: string
+): number {
+  let splitIndex = -1;
+  let previous = getComparableCoord(coords, 0, comparableCoords);
+  if (previous > afterComparable) {
+    splitIndex = 0;
+  }
+
+  for (let index = 1; index < coords.length; index++) {
+    const current = getComparableCoord(coords, index, comparableCoords);
+    if (current < previous) {
+      throw new Error(
+        `Variant '${variantName}' has descending '${concatDim}' coordinates; concatenation requires ascending order`
+      );
+    }
+    if (splitIndex === -1 && current > afterComparable) {
+      splitIndex = index;
+    }
+    previous = current;
+  }
+
+  return splitIndex;
+}
+
+/**
+ * Binary search for axes where comparison is expensive: touches only O(log n)
+ * coordinates. Assumes interior monotonicity (true for decoded zarr axes);
+ * endpoint probes reject a fully descending axis, and a post-search check
+ * catches the case where the search saw only in-range coords yet the tail
+ * exceeds the coverage end.
+ */
+function findSplitIndexBinary(
+  coords: Array<string | number | Date>,
+  afterComparable: number,
+  comparableCoords: WeakMap<Array<string | number | Date>, Float64Array>,
+  variantName: string,
+  concatDim: string
+): number {
+  const firstCoord = getComparableCoord(coords, 0, comparableCoords);
+  const lastCoord = getComparableCoord(
+    coords,
+    coords.length - 1,
+    comparableCoords
+  );
+  if (firstCoord > lastCoord) {
+    throw new Error(
+      `Variant '${variantName}' has descending '${concatDim}' coordinates; concatenation requires ascending order`
+    );
+  }
+
   let start = 0;
   let end = coords.length;
-
   while (start < end) {
     const midpoint = start + Math.floor((end - start) / 2);
     if (
@@ -160,8 +228,17 @@ function findSplitIndex(
       start = midpoint + 1;
     }
   }
+  const splitIndex = start < coords.length ? start : -1;
 
-  return start < coords.length ? start : -1;
+  if (splitIndex === -1 && lastCoord > afterComparable) {
+    // The search saw only coords <= the coverage end yet the final coord is
+    // beyond it — the axis is not sorted ascending.
+    throw new Error(
+      `Variant '${variantName}' has unsorted '${concatDim}' coordinates; concatenation requires ascending order`
+    );
+  }
+
+  return splitIndex;
 }
 
 /**

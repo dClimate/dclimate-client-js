@@ -1,4 +1,3 @@
-import type { TimeRange } from "./types.js";
 import { Dataset } from "@dclimate/jaxray";
 
 export function normalizeSegment(value: string): string {
@@ -56,8 +55,11 @@ function coerceBySample(
   return String(input);
 }
 
+// normalizeTimeRange only handles date-like endpoints; numeric time axes are
+// compared directly by the caller, so this deliberately narrows to Date|string
+// rather than the wider public TimeRange (which also permits number).
 export function normalizeTimeRange(
-  range: TimeRange,
+  range: { start: Date | string; end: Date | string },
   coordValues?: unknown[]
 ): { start: string | number | Date; end: string | number | Date } {
   const sample = coordValues && coordValues.length > 0 ? coordValues[0] : undefined;

@@ -181,6 +181,29 @@ describe("loadStacCatalog IPFS walk", () => {
     expect(fixture.getMaxConcurrency()).toBeLessThanOrEqual(12);
   });
 
+  it("coalesces concurrent cold-cache loads into a single walk", async () => {
+    const gatewayUrl = "https://catalog-walk-coalesce.test";
+    const fixture = stubDelayedCatalogFetch(gatewayUrl);
+    const rootUrl = `${gatewayUrl}/ipfs/bafy-parallel-walk-root`;
+
+    // Two callers race on a cold cache. Without in-flight coalescing each runs
+    // its own walk with its own fan-out limiter, doubling gateway traffic and
+    // defeating the advertised MAX_CONCURRENT_CATALOG_FETCHES cap.
+    const [first, second] = await Promise.all([
+      loadStacCatalog(gatewayUrl),
+      loadStacCatalog(gatewayUrl),
+    ]);
+
+    const rootFetches = fixture.fetchMock.mock.calls.filter(
+      ([input]) =>
+        (input instanceof Request ? input.url : String(input)) === rootUrl,
+    );
+    expect(rootFetches).toHaveLength(1);
+    // Both callers observe the same shared result.
+    expect(first).toBe(second);
+    expect(fixture.getMaxConcurrency()).toBeLessThanOrEqual(12);
+  });
+
   it("attaches every item and organization id to all traversed collections", async () => {
     const gatewayUrl = "https://catalog-walk-completeness.test";
     const fixture = stubDelayedCatalogFetch(gatewayUrl);

@@ -1,5 +1,5 @@
 import {
-  cfTimeToDate,
+  encodeCFTime,
   Dataset,
   DataArray,
   parseCFTimeUnits,
@@ -76,22 +76,6 @@ function toTimelineValue(value: CoordinateValue): number {
   }
 
   return parsed;
-}
-
-function cfTimeToTimelineValue(
-  value: number,
-  units: string,
-  calendar?: string,
-): number {
-  const date = cfTimeToDate(value, units, calendar);
-  if (!date) {
-    throw new TypeError(
-      `Unable to convert CF time value "${String(
-        value,
-      )}" using units "${units}"`,
-    );
-  }
-  return date.getTime();
 }
 
 export class GeoTemporalDataset {
@@ -266,19 +250,40 @@ export class GeoTemporalDataset {
           if (!parseCFTimeUnits(units)) {
             throw new TypeError(`Invalid CF time units "${units}"`);
           }
-          const endpointToTimelineValue = (value: CoordinateValue): number =>
-            typeof value === "number"
-              ? cfTimeToTimelineValue(value, units, calendar)
-              : toTimelineValue(value);
-          startTime = endpointToTimelineValue(range.start);
-          endTime = endpointToTimelineValue(range.end);
+          // Compare on the axis's calendar-native ordinal timeline rather than
+          // decoding every coordinate to a JS Date. Non-Gregorian calendars
+          // (e.g. 360_day) contain dates such as Feb 30 that have no faithful
+          // Date representation; decoding them per-coordinate would throw and
+          // fail the entire selection, even for ranges that exclude them.
+          const endpointToOrdinal = (value: CoordinateValue): number => {
+            if (typeof value === "number") {
+              // Already a raw CF coordinate value on the axis's timeline.
+              return value;
+            }
+            const ordinal = encodeCFTime(
+              value instanceof Date ? value : String(value),
+              units,
+              calendar,
+            );
+            if (ordinal === null) {
+              throw new TypeError(
+                `Unable to encode time endpoint "${String(
+                  value,
+                )}" using units "${units}"`,
+              );
+            }
+            return ordinal;
+          };
+          startTime = endpointToOrdinal(range.start);
+          endTime = endpointToOrdinal(range.end);
           coordinateToTimelineValue = (coordinate) => {
             if (typeof coordinate !== "number") {
               throw new TypeError(
                 "Numeric time axis contains a non-numeric value",
               );
             }
-            return cfTimeToTimelineValue(coordinate, units, calendar);
+            // Raw CF coordinates are already ordinals on the same timeline.
+            return coordinate;
           };
         } else {
           if (

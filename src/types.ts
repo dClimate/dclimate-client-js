@@ -43,8 +43,10 @@ export interface BoundsSelectionOptions {
 }
 
 export interface TimeRange {
-  start: Date | string;
-  end: Date | string;
+  // Numeric endpoints are accepted for raw numeric time axes (e.g. CF
+  // ordinals or unitless indices); Date/string for date-like axes.
+  start: number | Date | string;
+  end: number | Date | string;
 }
 
 export type BoundsSelection =

@@ -182,6 +182,12 @@ export interface ResolvedDatasetFromStac {
 
 const catalogCache: Map<string, CatalogCacheEntry> = new Map();
 
+// In-flight loads keyed by cache key. The completed-catalog cache above only
+// dedupes once a walk finishes; without this, N concurrent cold-cache callers
+// each start their own walk (each with its own fan-out limiter), multiplying
+// gateway traffic by N. Sharing the promise means one walk, one limiter.
+const inFlightCatalogLoads: Map<string, Promise<StacCatalog>> = new Map();
+
 function getCatalogCacheKey(gatewayUrl: string, rootCid?: string): string {
   // `||` (not ??) so an empty-string rootCid shares the latest slot, matching
   // loadStacCatalog's `rootCid || getRootCatalogCid()` resolution.
@@ -334,6 +340,28 @@ export async function loadStacCatalog(
     return cached;
   }
 
+  // Coalesce concurrent cold-cache loads for the same catalog: the first
+  // caller runs the walk and every other caller awaits the same promise,
+  // so the fan-out cap is enforced across callers rather than per-call.
+  const cacheKey = getCatalogCacheKey(gatewayUrl, rootCid);
+  const existing = inFlightCatalogLoads.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const loadPromise = loadStacCatalogUncached(gatewayUrl, rootCid);
+  inFlightCatalogLoads.set(cacheKey, loadPromise);
+  try {
+    return await loadPromise;
+  } finally {
+    inFlightCatalogLoads.delete(cacheKey);
+  }
+}
+
+async function loadStacCatalogUncached(
+  gatewayUrl: string,
+  rootCid?: string
+): Promise<StacCatalog> {
   // Fetch root CID if not provided
   const cid = rootCid || (await getRootCatalogCid());
 

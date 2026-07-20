@@ -44,7 +44,7 @@ export interface ResolvedCidFromServer {
   variant: string;
 }
 
-const MAX_STAC_SEARCH_PAGES = 10;
+const MAX_STAC_SEARCH_PAGES = 50;
 
 function datasetIdFromItemId(
   itemId: string,
@@ -97,7 +97,11 @@ export async function resolveCidFromStacServer(
     collections: [collection],
   };
 
-  let response = await fetch(`${serverUrl}/search`, {
+  const searchUrl = `${serverUrl}/search`;
+  // The URL that produced the current response; relative `next` hrefs resolve
+  // against this, not the server root.
+  let currentUrl = searchUrl;
+  let response = await fetch(searchUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -120,14 +124,25 @@ export async function resolveCidFromStacServer(
         link.rel === "next" &&
         typeof link.href === "string"
     );
-    if (!nextLink || page === MAX_STAC_SEARCH_PAGES - 1) {
+    if (!nextLink) {
       break;
+    }
+    if (page === MAX_STAC_SEARCH_PAGES - 1) {
+      // A next link remains but we've hit the page cap. Surface the truncation
+      // instead of returning a silently partial result set, so callers can
+      // distinguish "not found" from "not yet fetched" (and fall back to the
+      // full IPFS catalog walk).
+      throw new Error(
+        `STAC server pagination for '${collection}' exceeded ${MAX_STAC_SEARCH_PAGES} pages; results truncated`
+      );
     }
 
     // STAC API pagination: next links may be plain GET hrefs, or POST links
     // carrying a token body (the dClimate server's shape) that must be
-    // re-POSTed — optionally merged with the original search body.
-    const nextUrl = new URL(nextLink.href, serverUrl).toString();
+    // re-POSTed — optionally merged with the original search body. Resolve
+    // relative hrefs against the URL that produced this response (the /search
+    // endpoint), not the server root, so a bare `?token=…` targets /search.
+    const nextUrl = new URL(nextLink.href, currentUrl).toString();
     if ((nextLink.method ?? "GET").toUpperCase() === "POST") {
       const nextBody = nextLink.merge
         ? { ...body, ...(nextLink.body ?? {}) }
@@ -140,6 +155,7 @@ export async function resolveCidFromStacServer(
     } else {
       response = await fetch(nextUrl);
     }
+    currentUrl = nextUrl;
   }
 
   // Filter to the exact dataset. A prefix match would conflate datasets such
