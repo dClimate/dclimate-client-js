@@ -24,6 +24,7 @@ export interface StacServerSearchResponse {
     rel: string;
     href: string;
     method?: string;
+    headers?: Record<string, string>;
     body?: Record<string, unknown>;
     merge?: boolean;
   }>;
@@ -139,21 +140,32 @@ export async function resolveCidFromStacServer(
 
     // STAC API pagination: next links may be plain GET hrefs, or POST links
     // carrying a token body (the dClimate server's shape) that must be
-    // re-POSTed — optionally merged with the original search body. Resolve
-    // relative hrefs against the URL that produced this response (the /search
-    // endpoint), not the server root, so a bare `?token=…` targets /search.
+    // re-POSTed. Per the STAC API link contract, a link may also carry
+    // `headers` (e.g. a header-based cursor), and `merge` governs both body and
+    // headers: merge them onto the original request when true, otherwise the
+    // link's values replace them. Resolve relative hrefs against the URL that
+    // produced this response (the /search endpoint), not the server root, so a
+    // bare `?token=…` targets /search.
     const nextUrl = new URL(nextLink.href, currentUrl).toString();
+    const baseHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const nextHeaders = nextLink.merge
+      ? { ...baseHeaders, ...(nextLink.headers ?? {}) }
+      : nextLink.headers ?? baseHeaders;
     if ((nextLink.method ?? "GET").toUpperCase() === "POST") {
       const nextBody = nextLink.merge
         ? { ...body, ...(nextLink.body ?? {}) }
         : nextLink.body ?? body;
       response = await fetch(nextUrl, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        // Content-Type is a floor for the JSON body even if a replacing
+        // (non-merge) link omits it.
+        headers: { "Content-Type": "application/json", ...nextHeaders },
         body: JSON.stringify(nextBody),
       });
     } else {
-      response = await fetch(nextUrl);
+      response = await fetch(nextUrl, { headers: nextHeaders });
     }
     currentUrl = nextUrl;
   }

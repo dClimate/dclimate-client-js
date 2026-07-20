@@ -133,6 +133,53 @@ describe("resolveCidFromStacServer pagination", () => {
     ).rejects.toThrow(/truncated/);
   });
 
+  it("forwards header-based cursors from the next link on both GET and POST", async () => {
+    const allFeatures = Array.from({ length: 150 }, (_, index) =>
+      feature(index),
+    );
+    const cursor = "cursor:bigcoll:100";
+    const seenHeaders: Array<Record<string, string>> = [];
+    const fetchMock = vi.fn(
+      async (input: string | URL | Request, init?: RequestInit) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        seenHeaders.push(headers);
+        const isNextPage = headers["x-stac-cursor"] === cursor;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            type: "FeatureCollection",
+            features: isNextPage
+              ? allFeatures.slice(100)
+              : allFeatures.slice(0, 100),
+            links: isNextPage
+              ? []
+              : [
+                  {
+                    rel: "next",
+                    method: "GET",
+                    href: `${serverUrl}/search?page=2`,
+                    headers: { "x-stac-cursor": cursor },
+                  },
+                ],
+          }),
+          text: async () => "",
+        } as Response;
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(collection, targetDataset, undefined, serverUrl),
+    ).resolves.toMatchObject({ cid: "bafy-page-item-119" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The header cursor from the link must reach the second request, or it
+    // would re-fetch page one forever.
+    expect(seenHeaders[1]?.["x-stac-cursor"]).toBe(cursor);
+  });
+
   it("re-POSTs token-style next links as the production server requires", async () => {
     // The dClimate STAC server paginates with
     // {rel: "next", method: "POST", href: ".../search", body: {limit, token}}.
