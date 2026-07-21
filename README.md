@@ -73,6 +73,45 @@ const slice = await point.timeRange({
 console.log(await slice.toRecords("precipitation"));
 ```
 
+### Siren REST API usage
+
+Use Siren methods by configuring `siren` in the client options.
+
+```typescript
+import { DClimateClient } from "@dclimate/dclimate-client-js";
+
+const client = new DClimateClient({
+  siren: {
+    auth: { type: "apiKey" }, // reads SIREN_API_KEY + SIREN_ACCOUNT_ID from env when omitted
+  },
+});
+
+const metrics = await client.siren.listMetrics(); // returns string[] of available metric names
+const regions = await client.siren.listRegions();
+const data = await client.siren.getMetricData({
+  regionId: regions[0].id,
+  metric: metrics[0],
+  startDate: "2025-01-01",
+  endDate: "2025-01-31",
+});
+```
+
+Siren lives under the `client.siren` namespace, kept separate from the core
+dataset API. Accessing it without configuring `siren` throws
+`SirenNotConfiguredError`. You can also use the standalone `SirenClient`
+directly if you don't need the dataset client at all.
+
+Credentials can be passed explicitly instead of via environment variables:
+
+```typescript
+const client = new DClimateClient({
+  siren: {
+    auth: { type: "apiKey", apiKey: "sk-...", accountId: "acc-..." },
+    // baseUrl: "https://production-api-siren.dclimate.net/api", // override if needed
+  },
+});
+```
+
 ### Automatic variant concatenation
 
 For datasets with multiple variants (e.g., ERA5 with "finalized" and "non-finalized" data), the client automatically merges them into a complete time series when no specific variant is requested:
@@ -316,6 +355,13 @@ Metric attributes include the gateway URL, store type, and status. The dataset C
 - `loadDataset({ request, options })` - Load a dataset from the catalog
 - `selectDataset({ request, selection, options })` - Load and apply selections in one call
 - `listAvailableDatasets()` - Get the full dataset catalog
+- `siren` - Namespaced Siren REST API client (getter; throws `SirenNotConfiguredError` unless `siren` is configured)
+
+### SirenClient (via `client.siren` or standalone)
+
+- `getMetricData(query)` - Fetch metric data for a region over a date range
+- `listRegions()` - List available regions (auto-paginates)
+- `listMetrics()` - List available metric names
 
 ### GeoTemporalDataset
 

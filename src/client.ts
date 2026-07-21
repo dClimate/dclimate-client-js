@@ -9,7 +9,7 @@ import {
 } from "./types.js";
 import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
-import { DatasetNotFoundError } from "./errors.js";
+import { DatasetNotFoundError, SirenNotConfiguredError } from "./errors.js";
 import { normalizeSegment } from "./utils.js";
 
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
@@ -27,6 +27,7 @@ import {
   listAvailableDatasetsFromStacServer,
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
+import { SirenClient } from "./siren/siren-client.js";
 
 function normalizeZarrGroup(group?: string): string | undefined {
   const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -40,6 +41,11 @@ export class DClimateClient {
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
   private clientIpfsElements?: IpfsElements;
+  private stacCatalog?: StacCatalog;
+  private stacCatalogTimestamp?: number;
+  private stacCacheTtl: number = 3600000; // 1 hour
+  private sirenClient?: SirenClient;
+
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
     this.rootCid = options.rootCid;
@@ -52,6 +58,10 @@ export class DClimateClient {
       options.stacServerUrl === null || options.rootCid
         ? null
         : options.stacServerUrl ?? DEFAULT_STAC_SERVER_URL;
+
+    if (options.siren) {
+      this.sirenClient = new SirenClient(options.siren);
+    }
   }
 
   private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
@@ -77,6 +87,21 @@ export class DClimateClient {
 
   async listCatalogEntries(): Promise<DatasetCatalog> {
     return this.listAvailableDatasets();
+  }
+
+  /**
+   * Access the Siren REST API client (metric data, regions, metrics).
+   * Namespaced so Siren stays separate from the core dataset API:
+   *   `client.siren.getMetricData(...)`, `client.siren.listRegions()`, etc.
+   * Requires `siren` to be configured in ClientOptions; throws otherwise.
+   */
+  get siren(): SirenClient {
+    if (!this.sirenClient) {
+      throw new SirenNotConfiguredError(
+        "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
+      );
+    }
+    return this.sirenClient;
   }
 
   async loadDataset({

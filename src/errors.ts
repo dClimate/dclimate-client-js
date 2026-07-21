@@ -10,3 +10,7 @@ export class DatasetNotFoundError extends DClimateClientError {}
 export class InvalidSelectionError extends DClimateClientError {}
 
 export class NoDataFoundError extends DClimateClientError {}
+
+export class SirenApiError extends DClimateClientError {}
+
+export class SirenNotConfiguredError extends DClimateClientError {}
