@@ -106,7 +106,6 @@ export class DClimateClient {
   /**
    * List available Siren regions.
    * Requires `siren` to be configured in ClientOptions.
-   * This is a free endpoint — no x402 payment required.
    */
   async listRegions(): Promise<SirenRegion[]> {
     if (!this.sirenClient) {

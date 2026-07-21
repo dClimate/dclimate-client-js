@@ -1,34 +1,11 @@
 /**
- * Siren API types and authentication strategies.
+ * Siren API types and authentication.
  *
- * Supports two auth modes:
- * - API key + account ID (traditional Bearer token)
- * - x402 pay-per-request via wallet signature (MetaMask, viem, etc.)
+ * Auth mode: API key + account ID (Bearer token).
  */
 
 // ---------------------------------------------------------------------------
-// EVM signer interface (mirrors @x402/evm ClientEvmSigner)
-// Defined here so the SDK has zero hard dependency on @x402/*
-// ---------------------------------------------------------------------------
-
-export interface EvmSigner {
-  readonly address: `0x${string}`;
-  signTypedData(params: {
-    domain: Record<string, unknown>;
-    types: Record<string, unknown>;
-    primaryType: string;
-    message: Record<string, unknown>;
-  }): Promise<`0x${string}`>;
-  readContract(params: {
-    address: `0x${string}`;
-    abi: unknown[];
-    functionName: string;
-    args?: unknown[];
-  }): Promise<unknown>;
-}
-
-// ---------------------------------------------------------------------------
-// Auth strategies (discriminated union)
+// Auth
 // ---------------------------------------------------------------------------
 
 export interface SirenApiKeyAuth {
@@ -39,29 +16,7 @@ export interface SirenApiKeyAuth {
   accountId?: string;
 }
 
-export interface SirenX402Auth {
-  type: "x402";
-  /** An EVM signer — use createEip1193Signer() for MetaMask, or @x402/evm's toClientEvmSigner() for viem */
-  signer: EvmSigner;
-  /** Chain network identifier (default: "base") */
-  network?: string;
-  /** x402 facilitator URL (uses protocol default if omitted) */
-  facilitatorUrl?: string;
-  /**
-   * Optional hard cap in atomic token units.
-   * Example (USDC 6 decimals): "100000" = $0.10.
-   * If all payment options exceed this value, the request is rejected before signing.
-   */
-  maxAmountAtomic?: string | bigint;
-  /**
-   * Optional convenience cap in USD cents for 6-decimal USD stablecoins (USDC/EURC).
-   * Example: 10 means "do not pay more than $0.10".
-   * If both maxUsdCents and maxAmountAtomic are set, the stricter cap is applied.
-   */
-  maxUsdCents?: number;
-}
-
-export type SirenAuth = SirenApiKeyAuth | SirenX402Auth;
+export type SirenAuth = SirenApiKeyAuth;
 
 // ---------------------------------------------------------------------------
 // Client options
@@ -69,10 +24,8 @@ export type SirenAuth = SirenApiKeyAuth | SirenX402Auth;
 
 export interface SirenOptions {
   auth: SirenAuth;
-  /** Base URL for API-key authenticated requests (default: production Siren API) */
+  /** Base URL for API requests (default: production Siren API) */
   baseUrl?: string;
-  /** Base URL for x402-authenticated requests (separate service, TBD) */
-  x402BaseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------

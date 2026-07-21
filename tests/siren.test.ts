@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DClimateClient } from "../src/index.js";
 import { SirenClient } from "../src/siren/siren-client.js";
-import { createEip1193Signer } from "../src/siren/helpers.js";
 import {
   SirenApiError,
   SirenNotConfiguredError,
 } from "../src/errors.js";
 import type { SirenRegionsResponse } from "../src/siren/types.js";
-import { encodePaymentRequiredHeader } from "@x402/core/http";
 
 const MOCK_REGIONS_RESPONSE: SirenRegionsResponse = {
   items: [
@@ -280,77 +278,6 @@ describe("SirenClient", () => {
     });
   });
 
-  describe("x402 auth", () => {
-    it("rejects invalid maxUsdCents values", async () => {
-      const mockSigner = {
-        address: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
-        signTypedData: vi.fn(),
-        readContract: vi.fn(),
-      };
-
-      const client = new SirenClient({
-        auth: { type: "x402", signer: mockSigner, network: "base", maxUsdCents: 0.5 },
-        x402BaseUrl: "https://x402-siren.example.com",
-      });
-
-      await expect(client.listRegions()).rejects.toThrow(/maxUsdCents/i);
-    });
-
-    it("blocks expensive payment requirements before signing", async () => {
-      const mockSigner = {
-        address: "0x1234567890abcdef1234567890abcdef12345678" as `0x${string}`,
-        signTypedData: vi.fn(),
-        readContract: vi.fn(),
-      };
-
-      const paymentRequired = {
-        x402Version: 2 as const,
-        resource: {
-          url: "https://x402-siren.example.com/metric-data/region-1/average_precip/2025-01-01/2025-01-03",
-          description: "Paid metric endpoint",
-          mimeType: "application/json",
-        },
-        accepts: [
-          {
-            scheme: "exact",
-            network: "eip155:8453",
-            asset: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
-            amount: "200000", // $0.20 USDC (6 decimals)
-            payTo: "0x1234567890abcdef1234567890abcdef12345678",
-            maxTimeoutSeconds: 300,
-            extra: {},
-          },
-        ],
-      };
-
-      fetchSpy.mockResolvedValueOnce(
-        new Response(null, {
-          status: 402,
-          headers: {
-            "PAYMENT-REQUIRED": encodePaymentRequiredHeader(paymentRequired),
-          },
-        })
-      );
-
-      const client = new SirenClient({
-        auth: { type: "x402", signer: mockSigner, network: "base", maxUsdCents: 10 },
-        x402BaseUrl: "https://x402-siren.example.com",
-      });
-
-      await expect(
-        client.getMetricData({
-          regionId: "region-1",
-          metric: "average_precip",
-          startDate: "2025-01-01",
-          endDate: "2025-01-03",
-        })
-      ).rejects.toThrow(/exceeds configured max amount/i);
-
-      expect(mockSigner.signTypedData).not.toHaveBeenCalled();
-      expect(fetchSpy).toHaveBeenCalledOnce();
-    });
-  });
-
   describe("DClimateClient integration", () => {
     it("exposes getMetricData and listRegions when siren is configured", async () => {
       fetchSpy.mockResolvedValueOnce({
@@ -390,142 +317,6 @@ describe("SirenClient", () => {
     it("throws when calling listRegions without siren configured", async () => {
       const client = new DClimateClient();
       await expect(client.listRegions()).rejects.toThrow(SirenNotConfiguredError);
-    });
-  });
-});
-
-describe("createEip1193Signer", () => {
-  it("creates a signer that calls eth_requestAccounts and eth_signTypedData_v4", async () => {
-    const mockProvider = {
-      request: vi.fn(),
-    };
-
-    // Mock eth_requestAccounts
-    mockProvider.request.mockImplementation(async (args: { method: string }) => {
-      if (args.method === "eth_requestAccounts") {
-        return ["0xabcdef1234567890abcdef1234567890abcdef12"];
-      }
-      if (args.method === "eth_signTypedData_v4") {
-        return "0xsignature123";
-      }
-      throw new Error(`Unexpected method: ${args.method}`);
-    });
-
-    const signer = createEip1193Signer(mockProvider);
-
-    const sig = await signer.signTypedData({
-      domain: { name: "test" },
-      types: { Test: [{ name: "value", type: "uint256" }] },
-      primaryType: "Test",
-      message: { value: 1 },
-    });
-
-    expect(sig).toBe("0xsignature123");
-
-    // Should have called eth_requestAccounts first, then eth_signTypedData_v4
-    expect(mockProvider.request).toHaveBeenCalledWith({
-      method: "eth_requestAccounts",
-    });
-    expect(mockProvider.request).toHaveBeenCalledWith({
-      method: "eth_signTypedData_v4",
-      params: [
-        "0xabcdef1234567890abcdef1234567890abcdef12",
-        expect.any(String),
-      ],
-    });
-  });
-
-  it("caches the wallet address after first call", async () => {
-    const mockProvider = {
-      request: vi.fn(),
-    };
-
-    mockProvider.request.mockImplementation(async (args: { method: string }) => {
-      if (args.method === "eth_requestAccounts") return ["0xabc123"];
-      if (args.method === "eth_signTypedData_v4") return "0xsig";
-      throw new Error(`Unexpected: ${args.method}`);
-    });
-
-    const signer = createEip1193Signer(mockProvider);
-
-    // Call signTypedData twice
-    await signer.signTypedData({
-      domain: {},
-      types: {},
-      primaryType: "Test",
-      message: {},
-    });
-    await signer.signTypedData({
-      domain: {},
-      types: {},
-      primaryType: "Test",
-      message: {},
-    });
-
-    // eth_requestAccounts should only be called once (cached)
-    const accountCalls = mockProvider.request.mock.calls.filter(
-      (call: unknown[]) => (call[0] as { method: string }).method === "eth_requestAccounts"
-    );
-    expect(accountCalls).toHaveLength(1);
-  });
-
-  it("throws if no accounts available", async () => {
-    const mockProvider = {
-      request: vi.fn().mockResolvedValue([]),
-    };
-
-    const signer = createEip1193Signer(mockProvider);
-
-    await expect(
-      signer.signTypedData({
-        domain: {},
-        types: {},
-        primaryType: "Test",
-        message: {},
-      })
-    ).rejects.toThrow(/No accounts available/);
-  });
-
-  it("throws when accessing address before any signing", () => {
-    const mockProvider = { request: vi.fn() };
-    const signer = createEip1193Signer(mockProvider);
-
-    expect(() => signer.address).toThrow(/not yet available/);
-  });
-
-  it("encodes readContract eth_call data for common ERC-20 selectors", async () => {
-    const mockProvider = {
-      request: vi.fn(async (args: { method: string }) => {
-        if (args.method === "eth_call") return "0x01";
-        throw new Error(`Unexpected method: ${args.method}`);
-      }),
-    };
-
-    const signer = createEip1193Signer(mockProvider);
-    const result = await signer.readContract({
-      address: "0x1111111111111111111111111111111111111111",
-      abi: [
-        {
-          type: "function",
-          name: "balanceOf",
-          inputs: [{ type: "address" }],
-        },
-      ],
-      functionName: "balanceOf",
-      args: ["0x2222222222222222222222222222222222222222"],
-    });
-
-    expect(result).toBe("0x01");
-    expect(mockProvider.request).toHaveBeenCalledWith({
-      method: "eth_call",
-      params: [
-        {
-          to: "0x1111111111111111111111111111111111111111",
-          data:
-            "0x70a082310000000000000000000000002222222222222222222222222222222222222222",
-        },
-        "latest",
-      ],
     });
   });
 });

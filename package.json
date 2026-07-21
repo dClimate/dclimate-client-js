@@ -52,10 +52,7 @@
   "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
     "@dclimate/jaxray": "^0.7.0",
-    "@opentelemetry/api": "^1.9.1",
-    "@x402/core": "^2.4.0",
-    "@x402/evm": "^2.4.0",
-    "@x402/fetch": "^2.4.0"
+    "@opentelemetry/api": "^1.9.1"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
@@ -63,7 +60,6 @@
     "globals": "17.6.0",
     "typescript": "^5.4.0",
     "typescript-eslint": "8.61.0",
-    "viem": "^2.46.2",
     "vitest": "^4.1.0"
   },
   "publishConfig": {

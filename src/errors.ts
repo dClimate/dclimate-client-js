@@ -14,7 +14,3 @@ export class NoDataFoundError extends DClimateClientError {}
 export class SirenApiError extends DClimateClientError {}
 
 export class SirenNotConfiguredError extends DClimateClientError {}
-
-export class X402PaymentError extends DClimateClientError {}
-
-export class X402NotInstalledError extends DClimateClientError {}

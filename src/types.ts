@@ -22,7 +22,7 @@ export interface ClientOptions {
   /**
    * Siren REST API configuration.
    * Enables getMetricData() and listRegions() methods on the client.
-   * Supports API key auth or x402 pay-per-request auth.
+   * Uses API key auth (Bearer token).
    */
   siren?: SirenOptions;
 }
