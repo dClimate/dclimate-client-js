@@ -154,10 +154,16 @@ export class SirenClient {
    * Fetch metric data for a region over a date range.
    */
   async getMetricData(query: SirenMetricQuery): Promise<SirenMetricDataPoint[]> {
-    const startDate = formatDate(query.startDate);
-    const endDate = formatDate(query.endDate);
+    // Encode every dynamic segment: regionId/metric/dates are arbitrary
+    // caller-supplied strings, so an unescaped '/', '?', or '#' could otherwise
+    // alter the requested route.
+    const accountId = encodeURIComponent(this.auth.accountId);
+    const regionId = encodeURIComponent(query.regionId);
+    const metric = encodeURIComponent(query.metric);
+    const startDate = encodeURIComponent(formatDate(query.startDate));
+    const endDate = encodeURIComponent(formatDate(query.endDate));
 
-    const url = `${this.baseUrl}/metric-data-multiple/${this.auth.accountId}/${query.regionId}/${query.metric}/${startDate}/${endDate}`;
+    const url = `${this.baseUrl}/metric-data-multiple/${accountId}/${regionId}/${metric}/${startDate}/${endDate}`;
     const response = await fetch(url, {
       method: "GET",
       headers: {
@@ -176,23 +182,56 @@ export class SirenClient {
 
   /**
    * List available regions.
+   *
+   * The endpoint is paginated (`limit`/`offset`/`total`); this walks every page
+   * so callers always get the complete list. Regions are de-duplicated by `id`,
+   * and pagination stops as soon as a page yields no new regions — so a server
+   * that ignores the pagination params degrades to a single page rather than
+   * looping forever or returning duplicates.
    */
   async listRegions(): Promise<SirenRegion[]> {
-    const url = `${this.baseUrl}/custom-regions/${this.auth.accountId}/custom`;
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${this.auth.apiKey}`,
-        "Content-Type": "application/json",
-      },
-    });
-    if (!response.ok) {
-      throw new SirenApiError(
-        `Siren API error (${response.status}): ${response.statusText}`
-      );
+    const accountId = encodeURIComponent(this.auth.accountId);
+    const pageSize = 100;
+    const seen = new Set<string>();
+    const all: SirenRegion[] = [];
+    let offset = 0;
+    // Hard cap on iterations as a final backstop against a misbehaving server.
+    const MAX_PAGES = 10_000;
+
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const url = `${this.baseUrl}/custom-regions/${accountId}/custom?limit=${pageSize}&offset=${offset}`;
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${this.auth.apiKey}`,
+          "Content-Type": "application/json",
+        },
+      });
+      if (!response.ok) {
+        throw new SirenApiError(
+          `Siren API error (${response.status}): ${response.statusText}`
+        );
+      }
+      const data: SirenRegionsResponse = await response.json();
+      const items = Array.isArray(data.items) ? data.items : [];
+
+      let added = 0;
+      for (const region of items) {
+        if (!seen.has(region.id)) {
+          seen.add(region.id);
+          all.push(region);
+          added++;
+        }
+      }
+
+      const total = typeof data.total === "number" ? data.total : all.length;
+      // Stop on natural end (collected everything) or on no progress (empty
+      // page, or a server that ignored the offset and re-sent the same page).
+      if (added === 0 || all.length >= total) break;
+      offset += items.length;
     }
-    const data: SirenRegionsResponse = await response.json();
-    return data.items;
+
+    return all;
   }
 
   /**

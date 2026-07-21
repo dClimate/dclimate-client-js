@@ -102,6 +102,78 @@ describe("SirenClient", () => {
       expect(opts.headers.Authorization).toBe("Bearer sk-test");
     });
 
+    it("walks all pages until total is reached", async () => {
+      const region = (id: string, name: string): SirenRegionsResponse["items"][number] => ({
+        ...MOCK_REGIONS_RESPONSE.items[0],
+        id,
+        name,
+      });
+
+      fetchSpy
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ items: [region("r1", "One")], limit: 1, offset: 0, total: 2 }),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: async () => ({ items: [region("r2", "Two")], limit: 1, offset: 1, total: 2 }),
+        });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      const regions = await client.listRegions();
+
+      expect(regions.map((r) => r.id)).toEqual(["r1", "r2"]);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+      expect(fetchSpy.mock.calls[1][0]).toContain("offset=1");
+    });
+
+    it("stops without looping or duplicating when the server ignores pagination", async () => {
+      const region = { ...MOCK_REGIONS_RESPONSE.items[0], id: "r1" };
+      // total claims 5 but every page returns the same single region.
+      fetchSpy.mockResolvedValue({
+        ok: true,
+        json: async () => ({ items: [region], limit: 100, offset: 0, total: 5 }),
+      });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      const regions = await client.listRegions();
+
+      expect(regions).toHaveLength(1);
+      // First page collects r1; second page adds nothing new → stop.
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
+    });
+
+    it("encodes dynamic path segments to prevent route injection", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => MOCK_METRIC_DATA,
+      });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      await client.getMetricData({
+        regionId: "region/1",
+        metric: "temp?x#y",
+        startDate: "2025-01-01",
+        endDate: "2025-01-03",
+      });
+
+      const [url] = fetchSpy.mock.calls[0];
+      expect(url).toContain("region%2F1");
+      expect(url).toContain("temp%3Fx%23y");
+      // No raw route-altering characters survive in the interpolated segments.
+      expect(url).not.toContain("region/1");
+      expect(url).not.toContain("temp?x");
+    });
+
     it("formats Date objects to YYYY-MM-DD strings", async () => {
       fetchSpy.mockResolvedValueOnce({
         ok: true,
