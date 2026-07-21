@@ -86,15 +86,20 @@ const client = new DClimateClient({
   },
 });
 
-const metrics = await client.listMetrics(); // returns string[] of available metric names
-const regions = await client.listRegions();
-const data = await client.getMetricData({
+const metrics = await client.siren.listMetrics(); // returns string[] of available metric names
+const regions = await client.siren.listRegions();
+const data = await client.siren.getMetricData({
   regionId: regions[0].id,
   metric: metrics[0],
   startDate: "2025-01-01",
   endDate: "2025-01-31",
 });
 ```
+
+Siren lives under the `client.siren` namespace, kept separate from the core
+dataset API. Accessing it without configuring `siren` throws
+`SirenNotConfiguredError`. You can also use the standalone `SirenClient`
+directly if you don't need the dataset client at all.
 
 Credentials can be passed explicitly instead of via environment variables:
 
@@ -350,9 +355,13 @@ Metric attributes include the gateway URL, store type, and status. The dataset C
 - `loadDataset({ request, options })` - Load a dataset from the catalog
 - `selectDataset({ request, selection, options })` - Load and apply selections in one call
 - `listAvailableDatasets()` - Get the full dataset catalog
-- `getMetricData(query)` - Fetch Siren region metric data (requires `siren` configured)
-- `listRegions()` - List available Siren regions (requires `siren` configured)
-- `listMetrics()` - List available Siren metric names (requires `siren` configured)
+- `siren` - Namespaced Siren REST API client (getter; throws `SirenNotConfiguredError` unless `siren` is configured)
+
+### SirenClient (via `client.siren` or standalone)
+
+- `getMetricData(query)` - Fetch metric data for a region over a date range
+- `listRegions()` - List available regions (auto-paginates)
+- `listMetrics()` - List available metric names
 
 ### GeoTemporalDataset
 

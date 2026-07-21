@@ -28,7 +28,6 @@ import {
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 import { SirenClient } from "./siren/siren-client.js";
-import type { SirenMetricQuery, SirenMetricDataPoint, SirenRegion } from "./siren/types.js";
 
 function normalizeZarrGroup(group?: string): string | undefined {
   const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -91,42 +90,18 @@ export class DClimateClient {
   }
 
   /**
-   * Fetch metric data for a Siren region over a date range.
-   * Requires `siren` to be configured in ClientOptions.
+   * Access the Siren REST API client (metric data, regions, metrics).
+   * Namespaced so Siren stays separate from the core dataset API:
+   *   `client.siren.getMetricData(...)`, `client.siren.listRegions()`, etc.
+   * Requires `siren` to be configured in ClientOptions; throws otherwise.
    */
-  async getMetricData(query: SirenMetricQuery): Promise<SirenMetricDataPoint[]> {
+  get siren(): SirenClient {
     if (!this.sirenClient) {
       throw new SirenNotConfiguredError(
         "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
       );
     }
-    return this.sirenClient.getMetricData(query);
-  }
-
-  /**
-   * List available Siren regions.
-   * Requires `siren` to be configured in ClientOptions.
-   */
-  async listRegions(): Promise<SirenRegion[]> {
-    if (!this.sirenClient) {
-      throw new SirenNotConfiguredError(
-        "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
-      );
-    }
-    return this.sirenClient.listRegions();
-  }
-
-  /**
-   * List available Siren metric names.
-   * Requires `siren` to be configured in ClientOptions.
-   */
-  async listMetrics(): Promise<string[]> {
-    if (!this.sirenClient) {
-      throw new SirenNotConfiguredError(
-        "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
-      );
-    }
-    return this.sirenClient.listMetrics();
+    return this.sirenClient;
   }
 
   async loadDataset({

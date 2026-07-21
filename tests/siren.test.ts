@@ -417,7 +417,7 @@ describe("SirenClient", () => {
   });
 
   describe("DClimateClient integration", () => {
-    it("exposes getMetricData and listRegions when siren is configured", async () => {
+    it("exposes Siren via the client.siren namespace when configured", async () => {
       fetchSpy.mockResolvedValueOnce({
         ok: true,
         json: async () => MOCK_METRIC_DATA,
@@ -429,7 +429,9 @@ describe("SirenClient", () => {
         },
       });
 
-      const data = await client.getMetricData({
+      expect(client.siren).toBeInstanceOf(SirenClient);
+
+      const data = await client.siren.getMetricData({
         regionId: "region-1",
         metric: "average_precip",
         startDate: "2025-01-01",
@@ -439,25 +441,7 @@ describe("SirenClient", () => {
       expect(data).toEqual(MOCK_METRIC_DATA);
     });
 
-    it("throws when calling getMetricData without siren configured", async () => {
-      const client = new DClimateClient();
-
-      await expect(
-        client.getMetricData({
-          regionId: "region-1",
-          metric: "average_precip",
-          startDate: "2025-01-01",
-          endDate: "2025-01-03",
-        })
-      ).rejects.toThrow(SirenNotConfiguredError);
-    });
-
-    it("throws when calling listRegions without siren configured", async () => {
-      const client = new DClimateClient();
-      await expect(client.listRegions()).rejects.toThrow(SirenNotConfiguredError);
-    });
-
-    it("exposes listMetrics when siren is configured", async () => {
+    it("exposes listMetrics through client.siren", async () => {
       fetchSpy.mockResolvedValueOnce({
         ok: true,
         json: async () => ["average_precip", "max_temp"],
@@ -469,15 +453,15 @@ describe("SirenClient", () => {
         },
       });
 
-      await expect(client.listMetrics()).resolves.toEqual([
+      await expect(client.siren.listMetrics()).resolves.toEqual([
         "average_precip",
         "max_temp",
       ]);
     });
 
-    it("throws when calling listMetrics without siren configured", async () => {
+    it("throws SirenNotConfiguredError when accessing client.siren unconfigured", () => {
       const client = new DClimateClient();
-      await expect(client.listMetrics()).rejects.toThrow(SirenNotConfiguredError);
+      expect(() => client.siren).toThrow(SirenNotConfiguredError);
     });
   });
 });
