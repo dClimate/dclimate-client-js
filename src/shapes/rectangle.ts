@@ -92,25 +92,29 @@ export async function rectangle(
     return num;
   });
 
-  // Find coordinates within the rectangle bounds
-  const selectedLats: number[] = [];
-  const selectedLons: number[] = [];
+  // Find unique coordinates within the rectangle bounds, preserving grid order
+  const latSet = new Set<number>();
+  const lonSet = new Set<number>();
 
   for (let i = 0; i < latArray.length; i++) {
     const lat = latArray[i];
     if (lat >= minLat && lat <= maxLat) {
-      for (let j = 0; j < lonArray.length; j++) {
-        const lon = lonArray[j];
-        if (lon >= minLon && lon <= maxLon) {
-          selectedLats.push(lat);
-          selectedLons.push(lon);
-        }
-      }
+      latSet.add(lat);
     }
   }
 
+  for (let j = 0; j < lonArray.length; j++) {
+    const lon = lonArray[j];
+    if (lon >= minLon && lon <= maxLon) {
+      lonSet.add(lon);
+    }
+  }
+
+  const selectedLats = [...latSet];
+  const selectedLons = [...lonSet];
+
   // If no points in rectangle, return empty dataset
-  if (selectedLats.length === 0) {
+  if (selectedLats.length === 0 || selectedLons.length === 0) {
     return new Dataset({});
   }
 

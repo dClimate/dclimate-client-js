@@ -1,3 +1,5 @@
+export const EARTH_RADIUS_KM = 6371;
+
 /**
  * Calculates arclength distance in km between coordinate pairs,
  * assuming the earth is a perfect sphere.
@@ -38,8 +40,6 @@ export function haversine(
     const absA = Math.abs(a);
     const c = 2 * Math.asin(Math.sqrt(absA));
 
-    // Radius of Earth in km
-    const EARTH_RADIUS_KM = 6371;
     return c * EARTH_RADIUS_KM;
   };
 
@@ -66,6 +66,17 @@ export function haversine(
     lat2Arr.length,
     lon2Arr.length
   );
+
+  const inputArrays = [lat1Arr, lon1Arr, lat2Arr, lon2Arr];
+  if (
+    inputArrays.some(
+      (coordinates) => coordinates.length !== 1 && coordinates.length !== length
+    )
+  ) {
+    throw new RangeError(
+      "Coordinate arrays must have length 1 or share a common length"
+    );
+  }
 
   // Calculate distances for each pair
   const distances = [];

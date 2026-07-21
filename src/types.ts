@@ -6,6 +6,11 @@ export type ShardReadMode = "full" | "sparse";
 
 export interface ClientOptions {
   gatewayUrl?: string;
+  /**
+   * Pin catalog resolution to a specific root CID. Also disables the STAC
+   * server fast path, which only serves the latest catalog version.
+   */
+  rootCid?: string;
   ipfsElements?: IpfsElements;
   /**
    * STAC server URL for fast CID resolution.
@@ -38,8 +43,10 @@ export interface BoundsSelectionOptions {
 }
 
 export interface TimeRange {
-  start: Date | string;
-  end: Date | string;
+  // Numeric endpoints are accepted for raw numeric time axes (e.g. CF
+  // ordinals or unitless indices); Date/string for date-like axes.
+  start: number | Date | string;
+  end: number | Date | string;
 }
 
 export type BoundsSelection =

@@ -36,36 +36,28 @@ function normalizeZarrGroup(group?: string): string | undefined {
 export class DClimateClient {
   private gatewayUrl: string;
   private stacServerUrl: string | null;
+  private rootCid?: string;
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
   private clientIpfsElements?: IpfsElements;
-  private stacCatalog?: StacCatalog;
-  private stacCatalogTimestamp?: number;
-  private stacCacheTtl: number = 3600000; // 1 hour
-
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
+    this.rootCid = options.rootCid;
     this.clientIpfsElements = options.ipfsElements;
-    // stacServerUrl: use provided value, or default if undefined, or null to disable
+    // stacServerUrl: use provided value, or default if undefined, or null to
+    // disable. A pinned rootCid also disables the server path — the server
+    // only serves the latest catalog, so consulting it would silently bypass
+    // the pinned version (and contact public infrastructure).
     this.stacServerUrl =
-      options.stacServerUrl === null
+      options.stacServerUrl === null || options.rootCid
         ? null
         : options.stacServerUrl ?? DEFAULT_STAC_SERVER_URL;
   }
 
   private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
-    // Check if cached catalog is still valid
-    if (this.stacCatalog && this.stacCatalogTimestamp) {
-      const age = Date.now() - this.stacCatalogTimestamp;
-      if (age < this.stacCacheTtl) {
-        return this.stacCatalog;
-      }
-    }
-
-    // Load fresh catalog
-    this.stacCatalog = await loadStacCatalog(gatewayUrl);
-    this.stacCatalogTimestamp = Date.now();
-    return this.stacCatalog;
+    // Caching (per-gateway key + TTL) lives in loadStacCatalog's module
+    // cache; a second client-level cache only added double-TTL staleness.
+    return loadStacCatalog(gatewayUrl, this.rootCid);
   }
 
   async listAvailableDatasets(): Promise<DatasetCatalog> {
@@ -167,7 +159,7 @@ export class DClimateClient {
           catalog,
           resolvedCollection || request.collection || "",
           request.dataset,
-          request.variant,
+          concatenableItems[0].variant,
           resolvedOrganization
         );
         const resolvedOrganizationId =
@@ -301,14 +293,21 @@ export class DClimateClient {
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
     const zarrGroup = normalizeZarrGroup(options.zarrGroup);
 
+    // Order by concatPriority so metadata (concatenatedVariants, cid)
+    // reflects the same order the data is concatenated in.
+    const orderedVariants = [...concatVariants].sort(
+      (a, b) => a.concatPriority - b.concatPriority
+    );
+
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
-      concatVariants.map(async (variantConfig) => {
+      orderedVariants.map(async (variantConfig) => {
         // Load the dataset using the CID from STAC
         const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
           ipfsElements,
           zarrGroup,
+          shardReadMode: options.shardReadMode,
         });
 
         return {
@@ -327,7 +326,8 @@ export class DClimateClient {
       dataset: request.dataset,
       collection: request.collection,
       organization: request.organization,
-      concatenatedVariants: concatVariants.map((v) => v.variant),
+      concatenatedVariants: orderedVariants.map((v) => v.variant),
+      concatDimension: orderedVariants[0].concatDimension,
       path: pathParts.join("-"),
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "stac_concatenated",

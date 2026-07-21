@@ -131,16 +131,33 @@ export function secondsSince(startedAt: number): number {
 }
 
 export function classifyRetrievalError(error: unknown): RetrievalStatus {
-  const message = error instanceof Error ? error.message : String(error);
-  if (
-    message.includes("Connection refused") ||
-    message.includes("Max retries exceeded") ||
-    message.includes("Timeout") ||
-    message.includes("timed out") ||
-    message.includes("ECONNREFUSED") ||
-    message.includes("ETIMEDOUT")
-  ) {
-    return "connection_error";
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current !== undefined; depth++) {
+    const message = current instanceof Error ? current.message : String(current);
+    if (
+      message.includes("Connection refused") ||
+      message.includes("Max retries exceeded") ||
+      message.includes("Timeout") ||
+      message.includes("timed out") ||
+      message.includes("ECONNREFUSED") ||
+      message.includes("ETIMEDOUT") ||
+      // Anchored: undici throws exactly "fetch failed", browsers exactly
+      // "Failed to fetch" — a substring match over-classifies messages that
+      // merely mention a failed fetch.
+      /^fetch failed$|^failed to fetch$/i.test(message.trim())
+    ) {
+      return "connection_error";
+    }
+
+    try {
+      current =
+        typeof current === "object" && current !== null && "cause" in current
+          ? (current as { cause?: unknown }).cause
+          : undefined;
+    } catch {
+      // A throwing cause getter must not escape a metrics classifier.
+      current = undefined;
+    }
   }
   return "error";
 }

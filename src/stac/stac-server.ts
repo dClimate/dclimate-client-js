@@ -20,6 +20,14 @@ export interface StacServerSearchResponse {
   features: StacServerItem[];
   numberMatched?: number;
   numberReturned?: number;
+  links?: Array<{
+    rel: string;
+    href: string;
+    method?: string;
+    headers?: Record<string, string>;
+    body?: Record<string, unknown>;
+    merge?: boolean;
+  }>;
 }
 
 export interface StacServerItem {
@@ -36,6 +44,8 @@ export interface ResolvedCidFromServer {
   dataset: string;
   variant: string;
 }
+
+const MAX_STAC_SEARCH_PAGES = 50;
 
 function datasetIdFromItemId(
   itemId: string,
@@ -88,19 +98,77 @@ export async function resolveCidFromStacServer(
     collections: [collection],
   };
 
-  const response = await fetch(`${serverUrl}/search`, {
+  const searchUrl = `${serverUrl}/search`;
+  // The URL that produced the current response; relative `next` hrefs resolve
+  // against this, not the server root.
+  let currentUrl = searchUrl;
+  let response = await fetch(searchUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`STAC server error ${response.status}: ${text}`);
-  }
+  const features: StacServerItem[] = [];
+  for (let page = 0; page < MAX_STAC_SEARCH_PAGES; page++) {
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`STAC server error ${response.status}: ${text}`);
+    }
 
-  const data: StacServerSearchResponse = await response.json();
-  const features = data.features || [];
+    const data: StacServerSearchResponse = await response.json();
+    features.push(...(data.features || []));
+
+    const nextLink = data.links?.find(
+      (link) =>
+        typeof link === "object" &&
+        link !== null &&
+        link.rel === "next" &&
+        typeof link.href === "string"
+    );
+    if (!nextLink) {
+      break;
+    }
+    if (page === MAX_STAC_SEARCH_PAGES - 1) {
+      // A next link remains but we've hit the page cap. Surface the truncation
+      // instead of returning a silently partial result set, so callers can
+      // distinguish "not found" from "not yet fetched" (and fall back to the
+      // full IPFS catalog walk).
+      throw new Error(
+        `STAC server pagination for '${collection}' exceeded ${MAX_STAC_SEARCH_PAGES} pages; results truncated`
+      );
+    }
+
+    // STAC API pagination: next links may be plain GET hrefs, or POST links
+    // carrying a token body (the dClimate server's shape) that must be
+    // re-POSTed. Per the STAC API link contract, a link may also carry
+    // `headers` (e.g. a header-based cursor), and `merge` governs both body and
+    // headers: merge them onto the original request when true, otherwise the
+    // link's values replace them. Resolve relative hrefs against the URL that
+    // produced this response (the /search endpoint), not the server root, so a
+    // bare `?token=…` targets /search.
+    const nextUrl = new URL(nextLink.href, currentUrl).toString();
+    const baseHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const nextHeaders = nextLink.merge
+      ? { ...baseHeaders, ...(nextLink.headers ?? {}) }
+      : nextLink.headers ?? baseHeaders;
+    if ((nextLink.method ?? "GET").toUpperCase() === "POST") {
+      const nextBody = nextLink.merge
+        ? { ...body, ...(nextLink.body ?? {}) }
+        : nextLink.body ?? body;
+      response = await fetch(nextUrl, {
+        method: "POST",
+        // Content-Type is a floor for the JSON body even if a replacing
+        // (non-merge) link omits it.
+        headers: { "Content-Type": "application/json", ...nextHeaders },
+        body: JSON.stringify(nextBody),
+      });
+    } else {
+      response = await fetch(nextUrl, { headers: nextHeaders });
+    }
+    currentUrl = nextUrl;
+  }
 
   // Filter to the exact dataset. A prefix match would conflate datasets such
   // as precipitation_total and precipitation_total_land.
