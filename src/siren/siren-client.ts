@@ -239,9 +239,11 @@ export class SirenClient {
    */
   async listMetrics(): Promise<string[]> {
     const url = `${this.baseUrl}/metrics`;
+    // Public, body-less GET: use the CORS-safelisted `Accept` header rather than
+    // `Content-Type`, so cross-origin browser callers avoid a preflight request.
     const response = await fetch(url, {
       method: "GET",
-      headers: { "Content-Type": "application/json" },
+      headers: { Accept: "application/json" },
     });
     if (!response.ok) {
       throw new SirenApiError(

@@ -6,7 +6,10 @@
  *   - Or pass them directly in the auth config
  *
  * Run:
- *   npx tsx examples/siren-metric-data.ts
+ *   npx tsx examples/siren-metric-data.ts [regionId]
+ *
+ * Optionally pass a region id as the first argument (or via the REGION_ID env
+ * var). If omitted, the example uses the first region available to your account.
  */
 
 import { DClimateClient } from "../src/index.js";
@@ -18,17 +21,32 @@ async function main() {
     },
   });
 
+  // Discover a region from the caller's own account rather than hardcoding an
+  // id (region ids are account-scoped, so a fixed one fails for most users).
+  const requestedRegionId = process.env.REGION_ID ?? process.argv[2];
+  const regions = await client.siren.listRegions();
+  if (regions.length === 0) {
+    throw new Error("No Siren regions available for this account.");
+  }
+  const region = regions.find((r) => r.id === requestedRegionId) ?? regions[0];
+
+  // Prefer average_precip if the account exposes it, else the first metric.
+  const metrics = await client.siren.listMetrics();
+  const metric = metrics.includes("average_precip") ? "average_precip" : metrics[0];
+  if (!metric) {
+    throw new Error("No Siren metrics available.");
+  }
+
   // Convert unix timestamps to dates
   const startDate = new Date(1767225600 * 1000); // 2025-12-31
   const endDate = new Date(1798761599 * 1000);   // 2026-12-31
 
-  console.log(`Fetching average_precip for region 4c59966e-8653-4534-a640-5b0e9be3de81`);
+  console.log(`Fetching ${metric} for region ${region.id} (${region.name})`);
   console.log(`Date range: ${startDate.toISOString().split("T")[0]} to ${endDate.toISOString().split("T")[0]}`);
 
-  const data = await client.getMetricData({
-    // Example of region id tied to a specific account
-    regionId: "4c59966e-8653-4534-a640-5b0e9be3de81",
-    metric: "average_precip",
+  const data = await client.siren.getMetricData({
+    regionId: region.id,
+    metric,
     startDate,
     endDate,
   });
