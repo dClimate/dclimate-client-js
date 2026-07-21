@@ -100,12 +100,12 @@ function formatDate(date: string | Date): string {
 }
 
 function getEnv(name: string): string | undefined {
-  // Works in Node.js; silently returns undefined in browsers
-  try {
-    return typeof process !== "undefined" ? process.env[name] : undefined;
-  } catch {
-    return undefined;
-  }
+  // Read from Node's process.env when available; returns undefined in browsers.
+  // Accessed via globalThis so this type-checks without @types/node.
+  const env = (
+    globalThis as { process?: { env?: Record<string, string | undefined> } }
+  ).process?.env;
+  return env?.[name];
 }
 
 export class SirenClient {
