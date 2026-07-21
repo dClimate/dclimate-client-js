@@ -5,6 +5,14 @@
  * which is faster than traversing the IPFS-hosted catalog structure.
  */
 
+import type {
+  CatalogCollection,
+  CatalogDataset,
+  DatasetCatalog,
+  DatasetVariantConfig,
+} from "./stac-catalog.js";
+import { getStringProperty } from "./stac-catalog.js";
+
 export const DEFAULT_STAC_SERVER_URL = "https://api.stac.dclimate.net";
 
 export interface StacServerSearchResponse {
@@ -12,13 +20,21 @@ export interface StacServerSearchResponse {
   features: StacServerItem[];
   numberMatched?: number;
   numberReturned?: number;
+  links?: Array<{
+    rel: string;
+    href: string;
+    method?: string;
+    headers?: Record<string, string>;
+    body?: Record<string, unknown>;
+    merge?: boolean;
+  }>;
 }
 
 export interface StacServerItem {
   type: "Feature";
   id: string;
   collection?: string;
-  properties: Record<string, any>;
+  properties: Record<string, unknown>;
   assets: Record<string, { href: string; type?: string; title?: string }>;
 }
 
@@ -27,6 +43,35 @@ export interface ResolvedCidFromServer {
   collectionId: string;
   dataset: string;
   variant: string;
+}
+
+const MAX_STAC_SEARCH_PAGES = 50;
+
+function datasetIdFromItemId(
+  itemId: string,
+  collection: string
+): string | undefined {
+  const prefix = `${collection}-`;
+  const remainder = itemId.startsWith(prefix) ? itemId.slice(prefix.length) : itemId;
+  const [dataset] = remainder.split("-");
+  return dataset || undefined;
+}
+
+function featureMatchesDataset(
+  feature: StacServerItem,
+  collection: string,
+  dataset: string
+): boolean {
+  if (feature.collection && feature.collection !== collection) {
+    return false;
+  }
+
+  const datasetId = getStringProperty(feature.properties, "dclimate:dataset_id");
+  if (datasetId) {
+    return datasetId === dataset;
+  }
+
+  return datasetIdFromItemId(feature.id, collection) === dataset;
 }
 
 /**
@@ -53,23 +98,83 @@ export async function resolveCidFromStacServer(
     collections: [collection],
   };
 
-  const response = await fetch(`${serverUrl}/search`, {
+  const searchUrl = `${serverUrl}/search`;
+  // The URL that produced the current response; relative `next` hrefs resolve
+  // against this, not the server root.
+  let currentUrl = searchUrl;
+  let response = await fetch(searchUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`STAC server error ${response.status}: ${text}`);
+  const features: StacServerItem[] = [];
+  for (let page = 0; page < MAX_STAC_SEARCH_PAGES; page++) {
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`STAC server error ${response.status}: ${text}`);
+    }
+
+    const data: StacServerSearchResponse = await response.json();
+    features.push(...(data.features || []));
+
+    const nextLink = data.links?.find(
+      (link) =>
+        typeof link === "object" &&
+        link !== null &&
+        link.rel === "next" &&
+        typeof link.href === "string"
+    );
+    if (!nextLink) {
+      break;
+    }
+    if (page === MAX_STAC_SEARCH_PAGES - 1) {
+      // A next link remains but we've hit the page cap. Surface the truncation
+      // instead of returning a silently partial result set, so callers can
+      // distinguish "not found" from "not yet fetched" (and fall back to the
+      // full IPFS catalog walk).
+      throw new Error(
+        `STAC server pagination for '${collection}' exceeded ${MAX_STAC_SEARCH_PAGES} pages; results truncated`
+      );
+    }
+
+    // STAC API pagination: next links may be plain GET hrefs, or POST links
+    // carrying a token body (the dClimate server's shape) that must be
+    // re-POSTed. Per the STAC API link contract, a link may also carry
+    // `headers` (e.g. a header-based cursor), and `merge` governs both body and
+    // headers: merge them onto the original request when true, otherwise the
+    // link's values replace them. Resolve relative hrefs against the URL that
+    // produced this response (the /search endpoint), not the server root, so a
+    // bare `?token=…` targets /search.
+    const nextUrl = new URL(nextLink.href, currentUrl).toString();
+    const baseHeaders: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const nextHeaders = nextLink.merge
+      ? { ...baseHeaders, ...(nextLink.headers ?? {}) }
+      : nextLink.headers ?? baseHeaders;
+    if ((nextLink.method ?? "GET").toUpperCase() === "POST") {
+      const nextBody = nextLink.merge
+        ? { ...body, ...(nextLink.body ?? {}) }
+        : nextLink.body ?? body;
+      response = await fetch(nextUrl, {
+        method: "POST",
+        // Content-Type is a floor for the JSON body even if a replacing
+        // (non-merge) link omits it.
+        headers: { "Content-Type": "application/json", ...nextHeaders },
+        body: JSON.stringify(nextBody),
+      });
+    } else {
+      response = await fetch(nextUrl, { headers: nextHeaders });
+    }
+    currentUrl = nextUrl;
   }
 
-  const data: StacServerSearchResponse = await response.json();
-  const features = data.features || [];
-
-  // Filter to matching dataset (item ID pattern: {collection}-{dataset}-{variant})
-  const prefix = `${collection}-${dataset}`;
-  const matches = features.filter((f) => f.id.startsWith(prefix));
+  // Filter to the exact dataset. A prefix match would conflate datasets such
+  // as precipitation_total and precipitation_total_land.
+  const matches = features.filter((f) =>
+    featureMatchesDataset(f, collection, dataset)
+  );
 
   if (matches.length === 0) {
     throw new Error(`No items found for ${collection}/${dataset}`);
@@ -81,7 +186,7 @@ export async function resolveCidFromStacServer(
 
   if (variant) {
     selectedItem = matches.find(
-      (f) => f.properties["dclimate:variant"] === variant
+      (f) => getStringProperty(f.properties, "dclimate:variant") === variant
     );
     if (!selectedItem) {
       throw new Error(
@@ -92,12 +197,13 @@ export async function resolveCidFromStacServer(
   } else {
     // Prefer: default > final > finalized > latest > first match
     selectedItem = matches[0];
-    resolvedVariant = matches[0].properties["dclimate:variant"] || "default";
+    resolvedVariant =
+      getStringProperty(matches[0].properties, "dclimate:variant") ?? "default";
 
     const preferredOrder = ["default", "final", "finalized", "latest"];
     for (const preferred of preferredOrder) {
       const found = matches.find(
-        (f) => f.properties["dclimate:variant"] === preferred
+        (f) => getStringProperty(f.properties, "dclimate:variant") === preferred
       );
       if (found) {
         selectedItem = found;
@@ -139,4 +245,191 @@ export async function resolveDatasetCidFromStacServer(
     serverUrl
   );
   return result.cid;
+}
+
+interface StacServerCollectionsResponse {
+  collections: Array<{
+    id: string;
+    title?: string;
+    extent?: unknown;
+  }>;
+}
+
+interface StacServerSearchFeature {
+  id: string;
+  collection?: string;
+  bbox?: number[];
+  properties: Record<string, unknown>;
+}
+
+interface StacServerSearchPage {
+  features: StacServerSearchFeature[];
+}
+
+function stripIpfsScheme(cid: string | undefined): string | undefined {
+  if (!cid) return undefined;
+  return cid.startsWith("ipfs://") ? cid.replace(/^ipfs:\/\//, "") : cid;
+}
+
+/**
+ * List all datasets/variants by querying a STAC API server directly.
+ *
+ * This is the fast path that mirrors `listAvailableDatasetsFromStac` (the IPFS
+ * walker) without traversing the IPFS-hosted catalog tree. Two requests:
+ *   1. GET  /collections  — collection ids, titles
+ *   2. POST /search       — items, with dataset/variant/CID in properties
+ *
+ * Returns the same {@link DatasetCatalog} shape as the IPFS walker so callers
+ * don't need to know which path produced it.
+ *
+ * Notes:
+ *   - Organization is derived from the `{org}_{name}` collection-id convention
+ *     (e.g. `noaa_aigfs` → org=`noaa`). The IPFS walker reads it from a
+ *     `dclimate:id` field on an org-level link; the STAC API doesn't expose
+ *     organizations as first-class entities.
+ *   - Category (historical/forecast) isn't populated here — the IPFS walker
+ *     pulls it from `dclimate:collections:<category>` on the org link, which
+ *     has no STAC API equivalent.
+ *   - The fixed `limit: 1000` covers today's catalog (~45 items) by a wide
+ *     margin. If the catalog grows past that, switch to following the
+ *     STAC `next` link instead of a single request.
+ */
+export async function listAvailableDatasetsFromStacServer(
+  serverUrl: string = DEFAULT_STAC_SERVER_URL
+): Promise<DatasetCatalog> {
+  const [collectionsResp, searchResp] = await Promise.all([
+    fetch(`${serverUrl}/collections`),
+    fetch(`${serverUrl}/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ limit: 1000 }),
+    }),
+  ]);
+
+  if (!collectionsResp.ok) {
+    const text = await collectionsResp.text();
+    throw new Error(
+      `STAC server /collections error ${collectionsResp.status}: ${text}`
+    );
+  }
+  if (!searchResp.ok) {
+    const text = await searchResp.text();
+    throw new Error(
+      `STAC server /search error ${searchResp.status}: ${text}`
+    );
+  }
+
+  const collectionsBody = (await collectionsResp.json()) as StacServerCollectionsResponse;
+  const searchBody = (await searchResp.json()) as StacServerSearchPage;
+
+  interface CollectionAccumulator {
+    title?: string;
+    organization?: string;
+    // Categories seen across items in this collection. Used to roll up to a
+    // single `category` value on the output — see the unanimity check below.
+    observations: Set<string>;
+    datasets: Map<string, Map<string, DatasetVariantConfig>>;
+  }
+
+  const accumulators = new Map<string, CollectionAccumulator>();
+
+  for (const coll of collectionsBody.collections ?? []) {
+    const organization = coll.id.includes("_") ? coll.id.split("_")[0] : undefined;
+    accumulators.set(coll.id, {
+      title: coll.title,
+      organization,
+      observations: new Set(),
+      datasets: new Map(),
+    });
+  }
+
+  for (const feature of searchBody.features ?? []) {
+    const collectionId =
+      feature.collection ??
+      (feature.id.includes("-") ? feature.id.split("-")[0] : undefined);
+    if (!collectionId) continue;
+
+    let entry = accumulators.get(collectionId);
+    if (!entry) {
+      entry = {
+        organization: collectionId.includes("_") ? collectionId.split("_")[0] : undefined,
+        observations: new Set(),
+        datasets: new Map(),
+      };
+      accumulators.set(collectionId, entry);
+    }
+
+    const props = feature.properties ?? {};
+    const observation = props["dclimate:observation"];
+    if (typeof observation === "string" && observation.length > 0) {
+      entry.observations.add(observation);
+    }
+    // Prefer the explicit property fields; fall back to id-parsing for items
+    // that pre-date the dclimate:* property convention.
+    const idParts = feature.id.split("-");
+    const datasetName =
+      getStringProperty(props, "dclimate:dataset_id") ??
+      (idParts.length >= 2 ? idParts[1] : undefined);
+    const variantName =
+      getStringProperty(props, "dclimate:variant") ??
+      (idParts.length >= 3 ? idParts.slice(2).join("-") : "default");
+    if (!datasetName) continue;
+
+    const cid = stripIpfsScheme(
+      getStringProperty(props, "dclimate:latest_dataset_cid")
+    );
+
+    const variantConfig: DatasetVariantConfig = { variant: variantName };
+    if (cid) variantConfig.cid = cid;
+
+    const bbox = feature.bbox;
+    if (Array.isArray(bbox) && bbox.length >= 4) {
+      variantConfig.spatialExtent = {
+        bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
+      };
+    }
+
+    const startDt =
+      getStringProperty(props, "start_datetime") ??
+      getStringProperty(props, "datetime") ??
+      null;
+    const endDt =
+      getStringProperty(props, "end_datetime") ??
+      getStringProperty(props, "datetime") ??
+      null;
+    if (startDt !== null || endDt !== null) {
+      variantConfig.temporalExtent = { start: startDt, end: endDt };
+    }
+
+    let datasetVariants = entry.datasets.get(datasetName);
+    if (!datasetVariants) {
+      datasetVariants = new Map();
+      entry.datasets.set(datasetName, datasetVariants);
+    }
+    datasetVariants.set(variantName, variantConfig);
+  }
+
+  const result: DatasetCatalog = [];
+  for (const [collectionId, entry] of accumulators) {
+    if (entry.datasets.size === 0) continue;
+    const datasets: CatalogDataset[] = [];
+    for (const [datasetName, variants] of entry.datasets) {
+      datasets.push({ dataset: datasetName, variants: [...variants.values()] });
+    }
+    const collection: CatalogCollection = {
+      collection: collectionId,
+      datasets,
+    };
+    if (entry.organization) collection.organization = entry.organization;
+    if (entry.title) collection.title = entry.title;
+    // Only roll up to a collection-level category when every item in the
+    // collection agrees. Mixed observations would be a meaningful ambiguity
+    // — leave undefined and let callers handle it rather than picking a
+    // misleading value.
+    if (entry.observations.size === 1) {
+      collection.category = [...entry.observations][0];
+    }
+    result.push(collection);
+  }
+  return result;
 }

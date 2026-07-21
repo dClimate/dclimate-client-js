@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeAll } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   resolveCidFromStacServer,
   resolveDatasetCidFromStacServer,
@@ -76,6 +76,136 @@ describe("STAC Server", () => {
   describe("constants", () => {
     it("has correct default server URL", () => {
       expect(DEFAULT_STAC_SERVER_URL).toBe("https://api.stac.dclimate.net");
+    });
+  });
+
+  describe("exact dataset matching", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function mockSearchResponse(features: unknown[]) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          json: async () => ({
+            type: "FeatureCollection",
+            features,
+          }),
+          text: async () => "",
+        }))
+      );
+    }
+
+    it("does not resolve a base ERA5 dataset to a *_land prefix collision", async () => {
+      mockSearchResponse([
+        {
+          type: "Feature",
+          id: "ecmwf_era5-precipitation_total_land-finalized",
+          collection: "ecmwf_era5",
+          properties: {
+            "dclimate:dataset_id": "precipitation_total_land",
+            "dclimate:variant": "finalized",
+          },
+          assets: {
+            data: {
+              href: "ipfs://bafy-era5-land-precip-finalized",
+            },
+          },
+        },
+        {
+          type: "Feature",
+          id: "ecmwf_era5-precipitation_total-finalized",
+          collection: "ecmwf_era5",
+          properties: {
+            "dclimate:dataset_id": "precipitation_total",
+            "dclimate:variant": "finalized",
+          },
+          assets: {
+            data: {
+              href: "ipfs://bafy-era5-precip-finalized",
+            },
+          },
+        },
+      ]);
+
+      const result = await resolveCidFromStacServer(
+        "ecmwf_era5",
+        "precipitation_total",
+        "finalized",
+        "https://example.test"
+      );
+
+      expect(result.cid).toBe("bafy-era5-precip-finalized");
+    });
+
+    it("rejects a request when only a prefix-related land dataset exists", async () => {
+      mockSearchResponse([
+        {
+          type: "Feature",
+          id: "ecmwf_era5-wind_u_10m_land-finalized",
+          collection: "ecmwf_era5",
+          properties: {
+            "dclimate:dataset_id": "wind_u_10m_land",
+            "dclimate:variant": "finalized",
+          },
+          assets: {
+            data: {
+              href: "ipfs://bafy-era5-land-wind-u",
+            },
+          },
+        },
+      ]);
+
+      await expect(
+        resolveCidFromStacServer(
+          "ecmwf_era5",
+          "wind_u_10m",
+          "finalized",
+          "https://example.test"
+        )
+      ).rejects.toThrow(/No items found/);
+    });
+
+    it("keeps legacy item-id fallback exact", async () => {
+      mockSearchResponse([
+        {
+          type: "Feature",
+          id: "ecmwf_era5-temperature_2m_land-finalized",
+          collection: "ecmwf_era5",
+          properties: {
+            "dclimate:variant": "finalized",
+          },
+          assets: {
+            data: {
+              href: "ipfs://bafy-era5-land-t2m",
+            },
+          },
+        },
+        {
+          type: "Feature",
+          id: "ecmwf_era5-temperature_2m-finalized",
+          collection: "ecmwf_era5",
+          properties: {
+            "dclimate:variant": "finalized",
+          },
+          assets: {
+            data: {
+              href: "ipfs://bafy-era5-t2m",
+            },
+          },
+        },
+      ]);
+
+      const result = await resolveCidFromStacServer(
+        "ecmwf_era5",
+        "temperature_2m",
+        "finalized",
+        "https://example.test"
+      );
+
+      expect(result.cid).toBe("bafy-era5-t2m");
     });
   });
 

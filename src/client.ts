@@ -24,14 +24,21 @@ import {
 import { DatasetCatalog } from "./stac/stac-catalog.js";
 import {
   resolveCidFromStacServer,
+  listAvailableDatasetsFromStacServer,
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 import { SirenClient } from "./siren/siren-client.js";
 import type { SirenMetricQuery, SirenMetricDataPoint, SirenRegion } from "./siren/types.js";
 
+function normalizeZarrGroup(group?: string): string | undefined {
+  const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
+  return normalized || undefined;
+}
+
 export class DClimateClient {
   private gatewayUrl: string;
   private stacServerUrl: string | null;
+  private rootCid?: string;
   private cachedGateway?: string;
   private cachedIpfs?: IpfsElements;
   private clientIpfsElements?: IpfsElements;
@@ -42,10 +49,14 @@ export class DClimateClient {
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
+    this.rootCid = options.rootCid;
     this.clientIpfsElements = options.ipfsElements;
-    // stacServerUrl: use provided value, or default if undefined, or null to disable
+    // stacServerUrl: use provided value, or default if undefined, or null to
+    // disable. A pinned rootCid also disables the server path — the server
+    // only serves the latest catalog, so consulting it would silently bypass
+    // the pinned version (and contact public infrastructure).
     this.stacServerUrl =
-      options.stacServerUrl === null
+      options.stacServerUrl === null || options.rootCid
         ? null
         : options.stacServerUrl ?? DEFAULT_STAC_SERVER_URL;
 
@@ -55,21 +66,22 @@ export class DClimateClient {
   }
 
   private async getStacCatalog(gatewayUrl: string): Promise<StacCatalog> {
-    // Check if cached catalog is still valid
-    if (this.stacCatalog && this.stacCatalogTimestamp) {
-      const age = Date.now() - this.stacCatalogTimestamp;
-      if (age < this.stacCacheTtl) {
-        return this.stacCatalog;
-      }
-    }
-
-    // Load fresh catalog
-    this.stacCatalog = await loadStacCatalog(gatewayUrl);
-    this.stacCatalogTimestamp = Date.now();
-    return this.stacCatalog;
+    // Caching (per-gateway key + TTL) lives in loadStacCatalog's module
+    // cache; a second client-level cache only added double-TTL staleness.
+    return loadStacCatalog(gatewayUrl, this.rootCid);
   }
 
   async listAvailableDatasets(): Promise<DatasetCatalog> {
+    // STAC API first — single-digit HTTP calls vs. hundreds of serial IPFS
+    // gateway round-trips. Falls through to the IPFS walk only if the server
+    // is unavailable or misconfigured. Mirrors the resolve-CID pattern below.
+    if (this.stacServerUrl) {
+      try {
+        return await listAvailableDatasetsFromStacServer(this.stacServerUrl);
+      } catch {
+        // Fall through to IPFS catalog.
+      }
+    }
     const catalog = await this.getStacCatalog(this.gatewayUrl);
     return listAvailableDatasetsFromStac(catalog);
   }
@@ -117,6 +129,7 @@ export class DClimateClient {
   }): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
+    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
 
 
     if (request.cid) {
@@ -124,6 +137,8 @@ export class DClimateClient {
       const dataset = await openDatasetFromCid(request.cid, {
         gatewayUrl,
         ipfsElements,
+        zarrGroup,
+        shardReadMode: options.shardReadMode,
       });
 
       const metadata: DatasetMetadata = {
@@ -135,6 +150,7 @@ export class DClimateClient {
         path: "",
         cid: request.cid,
         fetchedAt: new Date(),
+        ...(zarrGroup ? { zarrGroup } : {}),
       };
     if (options.returnJaxrayDataset) {
       return [dataset, metadata];
@@ -181,11 +197,11 @@ export class DClimateClient {
           catalog,
           resolvedCollection || request.collection || "",
           request.dataset,
-          request.variant,
+          concatenableItems[0].variant,
           resolvedOrganization
         );
-        resolvedCollection = resolvedInfo.collectionId;
-        resolvedOrganization = resolvedInfo.organizationId ?? resolvedOrganization;
+        const resolvedOrganizationId =
+          resolvedInfo.organizationId ?? resolvedOrganization;
 
         // Multiple variants with concat metadata found
         // Load and concatenate based on dclimate:concatPriority
@@ -193,7 +209,7 @@ export class DClimateClient {
           {
             ...request,
             collection: resolvedInfo.collectionId,
-            organization: resolvedInfo.organizationId ?? resolvedOrganization,
+            organization: resolvedOrganizationId,
             variant: request.variant,
           },
           concatenableItems,
@@ -207,7 +223,6 @@ export class DClimateClient {
 
     // Fall back to single variant loading
     let cid: string | null = null;
-    let resolvedPath: string;
     let metadataDataset = request.dataset;
     let metadataCollection = resolvedCollection || request.collection;
     let metadataVariant = request.variant ?? "";
@@ -254,11 +269,13 @@ export class DClimateClient {
 
     // Build path from resolved names
     const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
-    resolvedPath = pathParts.join("-");
+    const resolvedPath = pathParts.join("-");
     
     const dataset = await openDatasetFromCid(cid, {
       gatewayUrl,
       ipfsElements,
+      zarrGroup,
+      shardReadMode: options.shardReadMode,
     });
 
     const metadata: DatasetMetadata = {
@@ -270,6 +287,7 @@ export class DClimateClient {
       cid: cid,
       source: "stac",
       fetchedAt: new Date(),
+      ...(zarrGroup ? { zarrGroup } : {}),
     };
 
     if (!metadata.organization && metadata.collection?.includes("_")) {
@@ -311,14 +329,23 @@ export class DClimateClient {
     }
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
+    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
+
+    // Order by concatPriority so metadata (concatenatedVariants, cid)
+    // reflects the same order the data is concatenated in.
+    const orderedVariants = [...concatVariants].sort(
+      (a, b) => a.concatPriority - b.concatPriority
+    );
 
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
-      concatVariants.map(async (variantConfig) => {
+      orderedVariants.map(async (variantConfig) => {
         // Load the dataset using the CID from STAC
         const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
           ipfsElements,
+          zarrGroup,
+          shardReadMode: options.shardReadMode,
         });
 
         return {
@@ -337,11 +364,13 @@ export class DClimateClient {
       dataset: request.dataset,
       collection: request.collection,
       organization: request.organization,
-      concatenatedVariants: concatVariants.map((v) => v.variant),
+      concatenatedVariants: orderedVariants.map((v) => v.variant),
+      concatDimension: orderedVariants[0].concatDimension,
       path: pathParts.join("-"),
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "stac_concatenated",
       fetchedAt: new Date(),
+      ...(zarrGroup ? { zarrGroup } : {}),
     };
 
     if (options.returnJaxrayDataset) {

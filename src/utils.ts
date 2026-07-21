@@ -1,4 +1,3 @@
-import type { TimeRange } from "./types.js";
 import { Dataset } from "@dclimate/jaxray";
 
 export function normalizeSegment(value: string): string {
@@ -21,7 +20,7 @@ export function isDatasetEmpty(dataset: Dataset): boolean {
   return Object.values(sizes).some((size) => size === 0);
 }
 
-function toDate(value: Date | string): Date | null {
+function toDate(value: Date | string | number): Date | null {
   if (value instanceof Date) return value;
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -56,8 +55,11 @@ function coerceBySample(
   return String(input);
 }
 
+// normalizeTimeRange only handles date-like endpoints; numeric time axes are
+// compared directly by the caller, so this deliberately narrows to Date|string
+// rather than the wider public TimeRange (which also permits number).
 export function normalizeTimeRange(
-  range: TimeRange,
+  range: { start: Date | string; end: Date | string },
   coordValues?: unknown[]
 ): { start: string | number | Date; end: string | number | Date } {
   const sample = coordValues && coordValues.length > 0 ? coordValues[0] : undefined;
@@ -71,8 +73,8 @@ export function normalizeTimeRange(
     return { start: startValue, end: endValue };
   }
 
-  const startDate = toDate(startValue as any);
-  const endDate = toDate(endValue as any);
+  const startDate = toDate(startValue);
+  const endDate = toDate(endValue);
   if (startDate && endDate && startDate > endDate) {
     return {
       start: endDate.toISOString(),

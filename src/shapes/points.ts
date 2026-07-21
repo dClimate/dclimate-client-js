@@ -1,5 +1,49 @@
-import { Dataset, DataArray } from "@dclimate/jaxray";
+import {
+  Dataset,
+  DataArray,
+  type CoordinateValue,
+  type DataArrayInput,
+  type Selection,
+  type SelectionOptions,
+} from "@dclimate/jaxray";
 import { InvalidSelectionError, NoDataFoundError } from "../errors.js";
+
+function isToleranceMiss(error: unknown): error is Error {
+  return (
+    error instanceof Error &&
+    error.message.startsWith("No coordinate within tolerance ")
+  );
+}
+
+function createCoordinateLookup(
+  coordinates: CoordinateValue[] | undefined
+): DataArray | undefined {
+  if (coordinates === undefined) {
+    return undefined;
+  }
+
+  if (coordinates.length === 0) {
+    throw new Error("Cannot select from an empty coordinate array");
+  }
+
+  if (!coordinates.every((coordinate) => typeof coordinate === "number")) {
+    throw new Error("Point selection requires numeric spatial coordinates");
+  }
+
+  return new DataArray(coordinates as DataArrayInput, {
+    dims: ["coordinate"],
+    coords: { coordinate: coordinates },
+  });
+}
+
+async function selectCoordinate(
+  lookup: DataArray,
+  requested: number,
+  options: SelectionOptions
+): Promise<CoordinateValue> {
+  const selected = await lookup.sel({ coordinate: requested }, options);
+  return selected.data as CoordinateValue;
+}
 
 /**
  * Selects data at specific point coordinates with optional CRS transformation
@@ -9,8 +53,8 @@ import { InvalidSelectionError, NoDataFoundError } from "../errors.js";
  * @param pointLons - Array of longitude coordinates (in the dataset's CRS or specified EPSG)
  * @param options - Configuration options
  * @param options.epsgCrs - EPSG code of the input coordinates (default: 4326)
- * @param options.snapToGrid - Whether to snap to nearest grid points (default: true)
- * @param options.tolerance - Maximum distance for snapping when snapToGrid is true (default: 10e-5)
+ * @param options.snapToGrid - Whether to snap to the nearest grid point without a distance limit (default: true)
+ * @param options.tolerance - Maximum nearest-grid distance allowed when snapToGrid is false (default: 10e-5)
  * @param options.latitudeKey - Name of latitude coordinate (default: "latitude")
  * @param options.longitudeKey - Name of longitude coordinate (default: "longitude")
  * @returns A new Dataset with data at the specified points
@@ -59,6 +103,17 @@ export async function points(
     throw new InvalidSelectionError("At least one point coordinate is required");
   }
 
+  for (let index = 0; index < pointLats.length; index++) {
+    if (
+      !Number.isFinite(pointLats[index]) ||
+      !Number.isFinite(pointLons[index])
+    ) {
+      throw new InvalidSelectionError(
+        `Point coordinates must be finite numbers (got latitude ${pointLats[index]}, longitude ${pointLons[index]} at index ${index})`
+      );
+    }
+  }
+
   // TODO: Add CRS transformation if epsgCrs !== 4326
   // For now, assuming input is already in EPSG:4326 (WGS84)
   if (epsgCrs !== 4326) {
@@ -67,39 +122,102 @@ export async function points(
     );
   }
 
-  // Create DataArrays for the point coordinates
-  const lats = new DataArray(pointLats, { dims: ["point"] });
-  const lons = new DataArray(pointLons, { dims: ["point"] });
-
-  // Perform the selection
-  let selectedData: Dataset;
-
-  try {
-    if (snapToGrid) {
-      selectedData = await dataset.sel({
-        [latitudeKey]: lats,
-        [longitudeKey]: lons,
-      } as any);
-    } else {
-      selectedData = await dataset.sel(
-        {
-          [latitudeKey]: lats,
-          [longitudeKey]: lons,
-        } as any,
-        {
-          method: "nearest",
-          tolerance,
-        }
-      );
-    }
-  } catch (error) {
-    if (!snapToGrid) {
-      throw new NoDataFoundError(
-        "User requested not to snap_to_grid, but at least one coordinate not in dataset"
-      );
-    }
-    throw error;
+  if (!dataset.coords[latitudeKey] || !dataset.coords[longitudeKey]) {
+    throw new InvalidSelectionError(
+      `Latitude (${latitudeKey}) and/or longitude (${longitudeKey}) coordinates not found in dataset`
+    );
   }
+
+  const selectionOptions: SelectionOptions = snapToGrid
+    ? { method: "nearest" }
+    : { method: "nearest", tolerance };
+  const pointSelections: Dataset[] = [];
+  const selectedLats: CoordinateValue[] = [];
+  const selectedLons: CoordinateValue[] = [];
+  const latitudeLookup = createCoordinateLookup(dataset.coords[latitudeKey]);
+  const longitudeLookup = createCoordinateLookup(dataset.coords[longitudeKey]);
+
+  for (let index = 0; index < pointLats.length; index++) {
+    const selection: Selection = {
+      [latitudeKey]: pointLats[index],
+      [longitudeKey]: pointLons[index],
+    };
+
+    try {
+      pointSelections.push(await dataset.sel(selection, selectionOptions));
+    } catch (error) {
+      if (!snapToGrid && isToleranceMiss(error)) {
+        throw new NoDataFoundError(
+          "User requested not to snap_to_grid, but at least one coordinate not in dataset"
+        );
+      }
+      throw error;
+    }
+
+    if (latitudeLookup) {
+      selectedLats.push(
+        await selectCoordinate(
+          latitudeLookup,
+          pointLats[index],
+          selectionOptions
+        )
+      );
+    }
+    if (longitudeLookup) {
+      selectedLons.push(
+        await selectCoordinate(
+          longitudeLookup,
+          pointLons[index],
+          selectionOptions
+        )
+      );
+    }
+  }
+
+  const pointCoordinates = pointLats.map((_, index) => index);
+  const selectedVariables: Record<string, DataArray> = {};
+
+  for (const name of dataset.dataVars) {
+    const original = dataset.getVariable(name);
+    const hasSpatialDimension = original.dims.some(
+      (dimension) =>
+        dimension === latitudeKey || dimension === longitudeKey
+    );
+
+    if (!hasSpatialDimension) {
+      selectedVariables[name] = original;
+      continue;
+    }
+
+    const pointVariables = await Promise.all(
+      pointSelections.map((selection) => selection.getVariable(name).compute())
+    );
+    const first = pointVariables[0];
+    const remainingCoordinates = Object.fromEntries(
+      first.dims.map((dimension) => [dimension, first.coords[dimension]])
+    );
+
+    selectedVariables[name] = new DataArray(
+      pointVariables.map((variable) => variable.data) as unknown as DataArrayInput,
+      {
+        dims: ["point", ...first.dims],
+        coords: { point: pointCoordinates, ...remainingCoordinates },
+        attrs: first.attrs,
+        name: first.name,
+      }
+    );
+  }
+
+  const selectedCoordinates = {
+    point: pointCoordinates,
+    ...(selectedLats.length > 0 ? { [latitudeKey]: selectedLats } : {}),
+    ...(selectedLons.length > 0 ? { [longitudeKey]: selectedLons } : {}),
+  };
+  const selectedData = new Dataset(selectedVariables, {
+    coords: selectedCoordinates,
+    attrs: dataset.attrs,
+    coordAttrs: dataset.coordAttrs,
+  });
 
   // Force computation to speed up aggregations
   const computed = await selectedData.compute();

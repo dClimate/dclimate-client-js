@@ -15,6 +15,8 @@ export {
   type ConcatenableStacItem,
   type ResolvedDatasetFromStac,
   type StacOrganization,
+  type SpatialExtent,
+  type TemporalExtent,
 } from "./stac-catalog.js";
 
 export {
@@ -26,6 +28,7 @@ export {
 export {
   resolveCidFromStacServer,
   resolveDatasetCidFromStacServer,
+  listAvailableDatasetsFromStacServer,
   DEFAULT_STAC_SERVER_URL,
   type StacServerSearchResponse,
   type StacServerItem,

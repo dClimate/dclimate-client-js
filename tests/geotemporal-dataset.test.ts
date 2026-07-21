@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { DatasetMetadata, DClimateClient, GeoTemporalDataset } from "../src/index.js";
+import { DatasetMetadata, DatasetRequest, DClimateClient, GeoTemporalDataset } from "../src/index.js";
 import { InvalidSelectionError, NoDataFoundError } from "../src/errors.js";
 
 describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 const client = new DClimateClient();
 
-const DATASET_REQUESTS: Record<string, any> = {
+const DATASET_REQUESTS: Record<string, DatasetRequest> = {
   fpar: { collection: "copernicus_clms", organization: "copernicus", dataset: "fpar", variant: "default" },
   "ifs-temperature": { collection: "ifs", organization: "ecmwf", dataset: "temperature_forecast", variant: "default" },
   "ifs-precip": { collection: "ifs", organization: "ecmwf", dataset: "precipitation_forecast", variant: "default" },
@@ -291,16 +291,16 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
   });
 
   describe("error handling with real data", () => {
-    it("throws InvalidSelectionError when selection results in no data", async () => {
+    it("throws NoDataFoundError when the time range contains no data", async () => {
       const [dataset] = await loadDataset("fpar") as [GeoTemporalDataset, DatasetMetadata];
 
-      // Use a time range far in the future that likely has no data
+      // Use a time range far in the future that has no data
       await expect(
         dataset.timeRange({
           start: new Date("2099-01-01T00:00:00Z").toISOString(),
           end: new Date("2099-01-02T00:00:00Z").toISOString(),
         })
-      ).rejects.toThrow(InvalidSelectionError);
+      ).rejects.toThrow(NoDataFoundError);
     });
 
     it("throws InvalidSelectionError for invalid dimension", async () => {

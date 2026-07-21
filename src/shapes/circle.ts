@@ -1,6 +1,70 @@
-import { Dataset, DataArray } from "@dclimate/jaxray";
-import { haversine } from "../math/haversine.js";
+import {
+  Dataset,
+  DataArray,
+  flatten,
+  type DataValue,
+} from "@dclimate/jaxray";
+import { EARTH_RADIUS_KM, haversine } from "../math/haversine.js";
 import { InvalidSelectionError } from "../errors.js";
+
+const DEGREES_PER_RADIAN = 180 / Math.PI;
+const BBOX_EPSILON_DEGREES = 1e-9;
+
+function contiguousIndices(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, offset) => start + offset);
+}
+
+function enclosingRange(indices: number[]): number[] {
+  if (indices.length === 0) return [];
+  return contiguousIndices(indices[0], indices[indices.length - 1]);
+}
+
+function angularDifferenceDegrees(longitude: number, center: number): number {
+  return ((longitude - center + 180) % 360 + 360) % 360 - 180;
+}
+
+function transposeTo(variable: DataArray, targetDims: string[]): DataArray {
+  const sourceDims = variable.dims;
+  if (sourceDims.every((dimension, index) => dimension === targetDims[index])) {
+    return variable;
+  }
+
+  const targetShape = targetDims.map(
+    (dimension) => variable.shape[sourceDims.indexOf(dimension)]
+  );
+  const sourceStrides = new Array(sourceDims.length);
+  let stride = 1;
+  for (let index = sourceDims.length - 1; index >= 0; index--) {
+    sourceStrides[index] = stride;
+    stride *= variable.shape[index];
+  }
+
+  const sourceData = flatten(variable.data);
+  const transposedData: DataValue[] = new Array(sourceData.length);
+  for (let targetOffset = 0; targetOffset < transposedData.length; targetOffset++) {
+    let remainder = targetOffset;
+    let sourceOffset = 0;
+    for (let targetIndex = targetDims.length - 1; targetIndex >= 0; targetIndex--) {
+      const targetCoordinate = remainder % targetShape[targetIndex];
+      remainder = Math.floor(remainder / targetShape[targetIndex]);
+      const sourceIndex = sourceDims.indexOf(targetDims[targetIndex]);
+      sourceOffset += targetCoordinate * sourceStrides[sourceIndex];
+    }
+    transposedData[targetOffset] = sourceData[sourceOffset];
+  }
+
+  return new DataArray(
+    { data: transposedData, shape: targetShape },
+    {
+      dims: targetDims,
+      coords: Object.fromEntries(
+        targetDims.map((dimension) => [dimension, variable.coords[dimension]])
+      ),
+      attrs: variable.attrs,
+      name: variable.name,
+    }
+  );
+}
 
 /**
  * Selects data points within a circular region defined by center coordinates and radius
@@ -34,15 +98,12 @@ export async function circle(
 ): Promise<Dataset> {
   const { latitudeKey = "latitude", longitudeKey = "longitude" } = options;
 
-  // Validate radius
   if (radiusKm <= 0) {
     throw new InvalidSelectionError("Radius must be a positive number");
   }
 
-  // Get the latitude and longitude coordinates
-  const coords = dataset.coords;
-  const latCoords = coords[latitudeKey];
-  const lonCoords = coords[longitudeKey];
+  const latCoords = dataset.coords[latitudeKey];
+  const lonCoords = dataset.coords[longitudeKey];
 
   if (!latCoords || !lonCoords) {
     throw new InvalidSelectionError(
@@ -61,124 +122,143 @@ export async function circle(
     );
   }
 
-  // Convert coordinates to numbers if needed
-  const latArray = latCoords.map((v) => {
-    const num = typeof v === "number" ? v : Number(v);
-    if (isNaN(num)) {
-      throw new InvalidSelectionError(
-        `Invalid latitude coordinate: ${v}`
-      );
+  const latArray = latCoords.map((value) => {
+    const coordinate = typeof value === "number" ? value : Number(value);
+    if (isNaN(coordinate)) {
+      throw new InvalidSelectionError(`Invalid latitude coordinate: ${value}`);
     }
-    return num;
+    return coordinate;
   });
 
-  const lonArray = lonCoords.map((v) => {
-    const num = typeof v === "number" ? v : Number(v);
-    if (isNaN(num)) {
-      throw new InvalidSelectionError(`Invalid longitude coordinate: ${v}`);
+  const lonArray = lonCoords.map((value) => {
+    const coordinate = typeof value === "number" ? value : Number(value);
+    if (isNaN(coordinate)) {
+      throw new InvalidSelectionError(`Invalid longitude coordinate: ${value}`);
     }
-    return num;
+    return coordinate;
   });
 
-  // Create a 2D boolean mask for all lat/lon combinations
-  const maskData: boolean[][] = [];
-  let anyTrue = false;
-  for (let latIdx = 0; latIdx < latArray.length; latIdx++) {
-    const row: boolean[] = [];
-    for (let lonIdx = 0; lonIdx < lonArray.length; lonIdx++) {
-      const distance = haversine(
-        centerLat,
-        centerLon,
-        latArray[latIdx],
-        lonArray[lonIdx]
-      ) as number;
-      const isWithinRadius = distance <= radiusKm;
-      row.push(isWithinRadius);
-      if (isWithinRadius) {
-        anyTrue = true;
-      }
-    }
-    maskData.push(row);
-  }
+  const angularRadiusRadians = radiusKm / EARTH_RADIUS_KM;
+  const latitudeDelta = angularRadiusRadians * DEGREES_PER_RADIAN;
+  const reachesNorthPole =
+    latitudeDelta + BBOX_EPSILON_DEGREES >= 90 - centerLat;
+  const reachesSouthPole =
+    latitudeDelta + BBOX_EPSILON_DEGREES >= 90 + centerLat;
+  const reachesPole = reachesNorthPole || reachesSouthPole;
+  const latitudeMin = reachesSouthPole
+    ? -90
+    : centerLat - latitudeDelta - BBOX_EPSILON_DEGREES;
+  const latitudeMax = reachesNorthPole
+    ? 90
+    : centerLat + latitudeDelta + BBOX_EPSILON_DEGREES;
+  const bboxLatitudeIndices = latArray
+    .map((latitude, index) => ({ latitude, index }))
+    .filter(({ latitude }) => latitude >= latitudeMin && latitude <= latitudeMax)
+    .map(({ index }) => index);
 
-  // If no points within radius, return empty dataset immediately
-  if (!anyTrue) {
+  const centerLatitudeRadians = (centerLat * Math.PI) / 180;
+  const longitudeExtentRatio =
+    Math.sin(angularRadiusRadians) /
+    Math.abs(Math.cos(centerLatitudeRadians));
+  const useFullLongitudeRange =
+    reachesPole || longitudeExtentRatio >= 1;
+  const longitudeDelta = useFullLongitudeRange
+    ? 180
+    : Math.asin(longitudeExtentRatio) * DEGREES_PER_RADIAN;
+  const bboxLongitudeIndices = useFullLongitudeRange
+    ? contiguousIndices(0, lonArray.length - 1)
+    : lonArray
+        .map((longitude, index) => ({ longitude, index }))
+        .filter(
+          ({ longitude }) =>
+            Math.abs(angularDifferenceDegrees(longitude, centerLon)) <=
+            longitudeDelta + BBOX_EPSILON_DEGREES
+        )
+        .map(({ index }) => index);
+
+  if (bboxLatitudeIndices.length === 0 || bboxLongitudeIndices.length === 0) {
     return new Dataset({});
   }
 
-  // Create mask DataArray
-  const maskArray = new DataArray(maskData, {
-    dims: [latitudeKey, longitudeKey],
-    coords: {
-      [latitudeKey]: latArray,
-      [longitudeKey]: lonArray,
-    },
+  const bboxLatitudeRange = enclosingRange(bboxLatitudeIndices);
+  const bboxDataset = await dataset.isel({
+    [latitudeKey]: bboxLatitudeRange,
+    [longitudeKey]: bboxLongitudeIndices,
   });
+  const bboxLatitudes = bboxLatitudeRange.map((index) => latArray[index]);
+  const bboxLongitudes = bboxLongitudeIndices.map((index) => lonArray[index]);
 
-  // Use where to mask the dataset (values outside circle become NaN)
-  const masked = dataset.where(maskArray);
+  const bboxMask = bboxLatitudes.map((latitude) =>
+    bboxLongitudes.map(
+      (longitude) =>
+        (haversine(
+          centerLat,
+          centerLon,
+          latitude,
+          longitude
+        ) as number) <= radiusKm
+    )
+  );
+  const maskLatitudeIndices = bboxMask
+    .map((row, index) => ({ row, index }))
+    .filter(({ row }) => row.some(Boolean))
+    .map(({ index }) => index);
+  const maskLongitudeIndices = bboxLongitudes
+    .map((_, index) => index)
+    .filter((longitudeIndex) =>
+      bboxMask.some((row) => row[longitudeIndex])
+    );
 
-  // Now we need to find which lat/lon indices have at least one non-NaN value
-  // Get the first variable to check for valid data
-  const firstVarName = masked.dataVars[0];
-  if (!firstVarName) {
+  if (maskLatitudeIndices.length === 0 || maskLongitudeIndices.length === 0) {
     return new Dataset({});
   }
 
-  const firstVar = masked.getVariable(firstVarName) as DataArray;
-  const dataArray = firstVar.data;
-
-  // Handle different data shapes (1D or 2D)
-  let validLatIndices: number[] = [];
-  let validLonIndices: number[] = [];
-
-  if (Array.isArray(dataArray) && dataArray.length > 0) {
-    if (Array.isArray(dataArray[0])) {
-      // 2D array
-      const data2D = dataArray as number[][];
-
-      // Find latitude indices that have at least one valid value
-      for (let latIdx = 0; latIdx < data2D.length; latIdx++) {
-        for (let lonIdx = 0; lonIdx < data2D[latIdx].length; lonIdx++) {
-          if (!isNaN(data2D[latIdx][lonIdx])) {
-            validLatIndices.push(latIdx);
-            break;
-          }
-        }
-      }
-
-      // Find longitude indices that have at least one valid value
-      for (let lonIdx = 0; lonIdx < lonArray.length; lonIdx++) {
-        for (let latIdx = 0; latIdx < latArray.length; latIdx++) {
-          if (!isNaN(data2D[latIdx][lonIdx])) {
-            validLonIndices.push(lonIdx);
-            break;
-          }
-        }
-      }
+  const trimmedDataset = await bboxDataset.isel({
+    [latitudeKey]: maskLatitudeIndices,
+    [longitudeKey]: maskLongitudeIndices,
+  });
+  const trimmedMask = maskLatitudeIndices.map((latitudeIndex) =>
+    maskLongitudeIndices.map(
+      (longitudeIndex) => bboxMask[latitudeIndex][longitudeIndex]
+    )
+  );
+  // jaxray cannot apply where to lazy operands, so materialize only after both
+  // spatial selections have reduced the dataset to the mask-derived trim.
+  const materialized = await trimmedDataset.compute();
+  const maskedVariables: Record<string, DataArray> = {};
+  for (const name of materialized.dataVars) {
+    const variable = materialized.getVariable(name);
+    if (
+      variable.dims.includes(latitudeKey) &&
+      variable.dims.includes(longitudeKey)
+    ) {
+      const variableMask = new DataArray(trimmedMask, {
+        dims: [latitudeKey, longitudeKey],
+        coords: {
+          [latitudeKey]: variable.coords[latitudeKey],
+          [longitudeKey]: variable.coords[longitudeKey],
+        },
+      });
+      maskedVariables[name] = variable.where(variableMask, null, {
+        keepAttrs: true,
+      });
     } else {
-      // 1D array - treat as all points valid if any non-NaN
-      const data1D = dataArray as number[];
-      const hasValidData = data1D.some((v) => !isNaN(v));
-      if (hasValidData) {
-        validLatIndices = Array.from({ length: latArray.length }, (_, i) => i);
-        validLonIndices = Array.from({ length: lonArray.length }, (_, i) => i);
-      }
+      maskedVariables[name] = variable;
     }
   }
 
-  // If no valid data, return empty dataset
-  if (validLatIndices.length === 0 || validLonIndices.length === 0) {
-    return new Dataset({});
+  // where puts condition dimensions first. Restore the input order for every
+  // variable (for example, time/latitude/longitude).
+  const resultVariables: Record<string, DataArray> = {};
+  for (const [name, variable] of Object.entries(maskedVariables)) {
+    resultVariables[name] = transposeTo(
+      variable,
+      materialized.getVariable(name).dims
+    );
   }
 
-  // Use isel to select only the valid indices
-  let filtered = await masked.isel({
-    [latitudeKey]: validLatIndices,
-  } as any);
-
-  filtered = await filtered.isel({
-    [longitudeKey]: validLonIndices,
-  } as any);
-  return filtered;
+  return new Dataset(resultVariables, {
+    attrs: materialized.attrs,
+    coordAttrs: materialized.coordAttrs,
+  });
 }

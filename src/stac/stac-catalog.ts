@@ -27,6 +27,15 @@ export class StacResolutionError extends StacCatalogError {
 // STAC Interfaces
 // ============================================================================
 
+export interface SpatialExtent {
+  bbox: [number, number, number, number]; // [minLon, minLat, maxLon, maxLat]
+}
+
+export interface TemporalExtent {
+  start: string | null;
+  end: string | null;
+}
+
 export interface DatasetVariantConfig {
   variant: string;
   cid?: string;
@@ -42,6 +51,8 @@ export interface DatasetVariantConfig {
    * Only used when concatPriority is defined.
    */
   concatDimension?: string;
+  spatialExtent?: SpatialExtent;
+  temporalExtent?: TemporalExtent;
 }
 
 export interface CatalogDataset {
@@ -66,7 +77,7 @@ export interface StacLink {
   type?: string;
   title?: string;
   // For dclimate:id, dclimate:types and other arbitrary metadata
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface StacAsset {
@@ -80,8 +91,8 @@ export interface StacItem {
   type: "Feature";
   stac_version: string;
   id: string;
-  properties: Record<string, any>;
-  geometry: any;
+  properties: Record<string, unknown>;
+  geometry: unknown;
   bbox?: number[];
   assets: Record<string, StacAsset>;
   links: StacLink[];
@@ -95,8 +106,8 @@ export interface StacCollection {
   description?: string;
   keywords?: string[];
   license?: string;
-  extent?: any;
-  summaries?: Record<string, any>;
+  extent?: unknown;
+  summaries?: Record<string, unknown>;
   links: StacLink[];
   items?: StacItem[]; // Loaded items
   organizationId?: string;
@@ -119,7 +130,22 @@ export interface StacCatalog {
 interface CatalogCacheEntry {
   catalog: StacCatalog;
   timestamp: number;
-  rootCid: string;
+}
+
+export function getStringProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): string | undefined {
+  const value = properties?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getNumberProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): number | undefined {
+  const value = properties?.[key];
+  return typeof value === "number" ? value : undefined;
 }
 
 export interface StacCatalogOptions {
@@ -156,8 +182,24 @@ export interface ResolvedDatasetFromStac {
 
 const catalogCache: Map<string, CatalogCacheEntry> = new Map();
 
-function getCachedCatalog(gatewayUrl: string, ttlMs: number): StacCatalog | null {
-  const key = `stac:${gatewayUrl}`;
+// In-flight loads keyed by cache key. The completed-catalog cache above only
+// dedupes once a walk finishes; without this, N concurrent cold-cache callers
+// each start their own walk (each with its own fan-out limiter), multiplying
+// gateway traffic by N. Sharing the promise means one walk, one limiter.
+const inFlightCatalogLoads: Map<string, Promise<StacCatalog>> = new Map();
+
+function getCatalogCacheKey(gatewayUrl: string, rootCid?: string): string {
+  // `||` (not ??) so an empty-string rootCid shares the latest slot, matching
+  // loadStacCatalog's `rootCid || getRootCatalogCid()` resolution.
+  return `stac:${gatewayUrl}:${rootCid || "latest"}`;
+}
+
+function getCachedCatalog(
+  gatewayUrl: string,
+  rootCid: string | undefined,
+  ttlMs: number
+): StacCatalog | null {
+  const key = getCatalogCacheKey(gatewayUrl, rootCid);
   const entry = catalogCache.get(key);
 
   if (!entry) return null;
@@ -171,12 +213,15 @@ function getCachedCatalog(gatewayUrl: string, ttlMs: number): StacCatalog | null
   return entry.catalog;
 }
 
-function setCachedCatalog(gatewayUrl: string, catalog: StacCatalog, rootCid: string): void {
-  const key = `stac:${gatewayUrl}`;
+function setCachedCatalog(
+  gatewayUrl: string,
+  rootCid: string | undefined,
+  catalog: StacCatalog
+): void {
+  const key = getCatalogCacheKey(gatewayUrl, rootCid);
   catalogCache.set(key, {
     catalog,
     timestamp: Date.now(),
-    rootCid,
   });
 }
 
@@ -216,6 +261,29 @@ function buildCollectionCategoryMap(link: StacLink): Map<string, string> {
   return map;
 }
 
+// Cap on simultaneous gateway requests during the catalog walk. Uncapped
+// fan-out fires every leaf at once (~139 documents on the real catalog);
+// throttled responses would be warn-skipped and cached as a silently
+// partial catalog for the TTL.
+const MAX_CONCURRENT_CATALOG_FETCHES = 12;
+
+function createFetchLimiter(limit: number) {
+  let active = 0;
+  const waiting: Array<() => void> = [];
+  return async function run<T>(task: () => Promise<T>): Promise<T> {
+    if (active >= limit) {
+      await new Promise<void>((resolve) => waiting.push(resolve));
+    }
+    active++;
+    try {
+      return await task();
+    } finally {
+      active--;
+      waiting.shift()?.();
+    }
+  };
+}
+
 // ============================================================================
 // Core STAC Functions
 // ============================================================================
@@ -223,9 +291,11 @@ function buildCollectionCategoryMap(link: StacLink): Map<string, string> {
 /**
  * Fetches the root catalog CID from the STAC API endpoint
  */
-export async function getRootCatalogCid(): Promise<string> {
+export async function getRootCatalogCid(
+  endpoint: string = "https://ipfs-gateway.dclimate.net/stac"
+): Promise<string> {
   try {
-    const response = await fetch("https://ipfs-gateway.dclimate.net/stac");
+    const response = await fetch(endpoint);
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
@@ -265,11 +335,33 @@ export async function loadStacCatalog(
   const cacheTtl = 3600000; // 1 hour
 
   // Check cache first
-  const cached = getCachedCatalog(gatewayUrl, cacheTtl);
+  const cached = getCachedCatalog(gatewayUrl, rootCid, cacheTtl);
   if (cached) {
     return cached;
   }
 
+  // Coalesce concurrent cold-cache loads for the same catalog: the first
+  // caller runs the walk and every other caller awaits the same promise,
+  // so the fan-out cap is enforced across callers rather than per-call.
+  const cacheKey = getCatalogCacheKey(gatewayUrl, rootCid);
+  const existing = inFlightCatalogLoads.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const loadPromise = loadStacCatalogUncached(gatewayUrl, rootCid);
+  inFlightCatalogLoads.set(cacheKey, loadPromise);
+  try {
+    return await loadPromise;
+  } finally {
+    inFlightCatalogLoads.delete(cacheKey);
+  }
+}
+
+async function loadStacCatalogUncached(
+  gatewayUrl: string,
+  rootCid?: string
+): Promise<StacCatalog> {
   // Fetch root CID if not provided
   const cid = rootCid || (await getRootCatalogCid());
 
@@ -283,98 +375,132 @@ export async function loadStacCatalog(
 
     const catalog: StacCatalog = await catalogResponse.json();
 
-    const organizations: StacOrganization[] = [];
-    const collections: StacCollection[] = [];
     const orgLinks = catalog.links.filter(
       (link) => link.rel === "child" && typeof link?.["dclimate:id"] === "string"
     );
 
-    for (const link of orgLinks) {
-      const orgId = link["dclimate:id"] as string;
-      const orgUrl = resolveIpfsUri(link.href, gatewayUrl);
-      const collectionCategories = buildCollectionCategoryMap(link);
-      const datasetSlugs = extractDatasetSlugsFromOrgLink(link);
+    // The limiter guards only the fetch itself (not whole mapper bodies), so
+    // a parent level never holds a slot while awaiting its children.
+    const limitedFetch = createFetchLimiter(MAX_CONCURRENT_CATALOG_FETCHES);
 
-      try {
-        const orgResponse = await fetch(orgUrl);
-        if (!orgResponse.ok) {
-          console.warn(`Failed to load organization catalog from ${link.href}: ${orgResponse.status}`);
-          continue;
+    const organizationResults = await Promise.all(
+      orgLinks.map(async (link) => {
+        const orgId = link["dclimate:id"] as string;
+        const orgUrl = resolveIpfsUri(link.href, gatewayUrl);
+        const collectionCategories = buildCollectionCategoryMap(link);
+        const datasetSlugs = extractDatasetSlugsFromOrgLink(link);
+
+        let organization: StacOrganization;
+        try {
+          const orgResponse = await limitedFetch(() => fetch(orgUrl));
+          if (!orgResponse.ok) {
+            console.warn(`Failed to load organization catalog from ${link.href}: ${orgResponse.status}`);
+            return undefined;
+          }
+
+          const orgCatalog: StacCatalog = await orgResponse.json();
+          organization = {
+            id: orgId,
+            title: link.title,
+            link,
+            catalog: orgCatalog,
+          };
+        } catch (orgError) {
+          console.warn(`Error loading organization ${link.href}:`, orgError);
+          return undefined;
         }
 
-        const orgCatalog: StacCatalog = await orgResponse.json();
-        organizations.push({
-          id: orgId,
-          title: link.title,
-          link,
-          catalog: orgCatalog,
-        });
-
-        const collectionLinks = orgCatalog.links.filter((orgLink) => orgLink.rel === "child");
-
-        for (const collectionLink of collectionLinks) {
-          try {
-            const collectionUrl = resolveIpfsUri(collectionLink.href, gatewayUrl);
-            const collectionResponse = await fetch(collectionUrl);
-
-            if (!collectionResponse.ok) {
-              console.warn(`Failed to load collection from ${collectionLink.href}: ${collectionResponse.status}`);
-              continue;
-            }
-
-            const collection: StacCollection = await collectionResponse.json();
-
-            // Load items for this collection
-            const items: StacItem[] = [];
-            const itemLinks = collection.links.filter((itemLink) => itemLink.rel === "item");
-
-            for (const itemLink of itemLinks) {
+        // A parsed org whose collection listing is malformed or fails still
+        // appears in catalog.organizations with zero collections, matching
+        // the pre-parallelization walk.
+        try {
+          const collectionLinks = organization.catalog.links.filter(
+            (orgLink) => orgLink.rel === "child"
+          );
+          const collectionResults = await Promise.all(
+            collectionLinks.map(async (collectionLink) => {
               try {
-                const itemUrl = resolveIpfsUri(itemLink.href, gatewayUrl);
-                const itemResponse = await fetch(itemUrl);
+                const collectionUrl = resolveIpfsUri(collectionLink.href, gatewayUrl);
+                const collectionResponse = await limitedFetch(() =>
+                  fetch(collectionUrl)
+                );
 
-                if (!itemResponse.ok) {
-                  console.warn(`Failed to load item from ${itemLink.href}: ${itemResponse.status}`);
-                  continue;
+                if (!collectionResponse.ok) {
+                  console.warn(`Failed to load collection from ${collectionLink.href}: ${collectionResponse.status}`);
+                  return undefined;
                 }
 
-                const item: StacItem = await itemResponse.json();
-                items.push(item);
-              } catch (itemError) {
-                console.warn(`Error loading item ${itemLink.href}:`, itemError);
+                const collection: StacCollection = await collectionResponse.json();
+
+                // Load items for this collection
+                const itemLinks = collection.links.filter((itemLink) => itemLink.rel === "item");
+                const itemResults = await Promise.all(
+                  itemLinks.map(async (itemLink) => {
+                    try {
+                      const itemUrl = resolveIpfsUri(itemLink.href, gatewayUrl);
+                      const itemResponse = await limitedFetch(() =>
+                        fetch(itemUrl)
+                      );
+
+                      if (!itemResponse.ok) {
+                        console.warn(`Failed to load item from ${itemLink.href}: ${itemResponse.status}`);
+                        return undefined;
+                      }
+
+                      return await itemResponse.json() as StacItem;
+                    } catch (itemError) {
+                      console.warn(`Error loading item ${itemLink.href}:`, itemError);
+                      return undefined;
+                    }
+                  })
+                );
+
+                collection.items = itemResults.filter((item): item is StacItem => item !== undefined);
+                collection.organizationId = orgId;
+                collection.organizationTitle = link.title;
+                const category = collectionCategories.get(collection.id);
+                if (category) {
+                  collection.category = category;
+                }
+
+                const datasetNames = datasetSlugs
+                  .filter((slug) => slug.startsWith(`${collection.id}/`))
+                  .map((slug) => slug.split("/")[1])
+                  .filter(Boolean);
+                if (datasetNames.length) {
+                  collection.datasetNames = datasetNames;
+                }
+
+                return collection;
+              } catch (collectionError) {
+                console.warn(`Error loading collection ${collectionLink.href}:`, collectionError);
+                return undefined;
               }
-            }
+            })
+          );
 
-            collection.items = items;
-            collection.organizationId = orgId;
-            collection.organizationTitle = link.title;
-            const category = collectionCategories.get(collection.id);
-            if (category) {
-              collection.category = category;
-            }
-
-            const datasetNames = datasetSlugs
-              .filter((slug) => slug.startsWith(`${collection.id}/`))
-              .map((slug) => slug.split("/")[1])
-              .filter(Boolean);
-            if (datasetNames.length) {
-              collection.datasetNames = datasetNames;
-            }
-
-            collections.push(collection);
-          } catch (collectionError) {
-            console.warn(`Error loading collection ${collectionLink.href}:`, collectionError);
-          }
+          return {
+            organization,
+            collections: collectionResults.filter(
+              (collection): collection is StacCollection => collection !== undefined
+            ),
+          };
+        } catch (orgError) {
+          console.warn(`Error loading organization ${link.href}:`, orgError);
+          return { organization, collections: [] };
         }
-      } catch (orgError) {
-        console.warn(`Error loading organization ${link.href}:`, orgError);
-      }
-    }
+      })
+    );
+    const loadedOrganizations = organizationResults.filter(
+      (result): result is NonNullable<typeof result> => result !== undefined
+    );
+    const organizations = loadedOrganizations.map(({ organization }) => organization);
+    const collections = loadedOrganizations.flatMap((result) => result.collections);
 
     catalog.collections = collections;
     catalog.organizations = organizations;
 
-    setCachedCatalog(gatewayUrl, catalog, cid);
+    setCachedCatalog(gatewayUrl, rootCid, catalog);
 
     return catalog;
   } catch (error) {
@@ -596,7 +722,7 @@ export function getConcatenableItemsFromStac(
   dataset: string,
   organization?: string
 ): ConcatenableStacItem[] {
-  const { collection: collectionObj } = selectCollectionFromCatalog(
+  const { collection: collectionObj, resolvedCollectionId } = selectCollectionFromCatalog(
     catalog,
     collection,
     dataset,
@@ -606,46 +732,53 @@ export function getConcatenableItemsFromStac(
   // Find all items matching the dataset pattern
   const matchingItems: ConcatenableStacItem[] = [];
 
+  // Item IDs follow {collection}-{dataset}-{variant}. Strip the resolved
+  // collection id as a prefix (mirroring resolveDatasetFromStac) so
+  // collection and dataset names containing hyphens still match.
+  const collectionPrefix = `${resolvedCollectionId}-`;
+
   for (const item of collectionObj.items || []) {
-    // Parse item ID: expected format is {collection}-{dataset}-{variant}
-    const parts = item.id.split("-");
-    if (parts.length < 2) continue;
+    if (!item.id.startsWith(collectionPrefix)) continue;
+    const remainder = item.id.slice(collectionPrefix.length);
 
-    const itemCollection = parts[0];
-    const itemDataset = parts[1];
-    const itemVariant = parts.slice(2).join("-") || "default";
-
-    // Check if this item matches our dataset
-    if (itemCollection === collection && itemDataset === dataset) {
-      // Check for concatenation metadata in properties
-      const concatPriority = item.properties["dclimate:concatPriority"];
-      const concatDimension = item.properties["dclimate:concatDimension"];
-
-      // Also check in link metadata (fallback)
-      const itemLink = collectionObj.links.find(
-        (link) =>
-          link.rel === "item" && link?.["dclimate:id"] === item.id
-      );
-
-      const linkConcatPriority = itemLink?.["dclimate:concatPriority"];
-      const linkConcatDimension = itemLink?.["dclimate:concatDimension"];
-
-      const priority = concatPriority ?? linkConcatPriority;
-      const dimension = concatDimension ?? linkConcatDimension ?? "time";
-
-      // Extract CID from assets
-      const dataAsset = item.assets.data;
-      if (!dataAsset) continue;
-
-      const cid = dataAsset.href.replace(/^ipfs:\/\//, "");
-
-      matchingItems.push({
-        variant: itemVariant,
-        cid,
-        concatPriority: priority ?? 0,
-        concatDimension: dimension,
-      });
+    if (remainder !== dataset && !remainder.startsWith(`${dataset}-`)) {
+      continue;
     }
+    const itemVariant =
+      remainder === dataset
+        ? "default"
+        : remainder.slice(dataset.length + 1) || "default";
+
+    // Check for concatenation metadata in properties
+    // Also check in link metadata (fallback)
+    const itemLink = collectionObj.links.find(
+      (link) =>
+        link.rel === "item" && link?.["dclimate:id"] === item.id
+    );
+
+    // Variants without an explicit concatPriority have not opted into
+    // auto-concatenation (see DatasetVariantConfig) and must be excluded.
+    const priority =
+      getNumberProperty(item.properties, "dclimate:concatPriority") ??
+      getNumberProperty(itemLink, "dclimate:concatPriority");
+    if (priority === undefined) continue;
+    const dimension =
+      getStringProperty(item.properties, "dclimate:concatDimension") ??
+      getStringProperty(itemLink, "dclimate:concatDimension") ??
+      "time";
+
+    // Extract CID from assets
+    const dataAsset = item.assets.data;
+    if (!dataAsset) continue;
+
+    const cid = dataAsset.href.replace(/^ipfs:\/\//, "");
+
+    matchingItems.push({
+      variant: itemVariant,
+      cid,
+      concatPriority: priority,
+      concatDimension: dimension,
+    });
   }
 
   return matchingItems;
@@ -666,7 +799,7 @@ export function listAvailableDatasetsFromStac(
     const datasetNamesFromLink = collection.datasetNames || [];
 
     // Group items by dataset
-    const datasetMap = new Map<string, { dataset: string; variants: any[] }>();
+    const datasetMap = new Map<string, CatalogDataset>();
 
     for (const item of collection.items || []) {
       const parts = item.id.split("-");
@@ -688,10 +821,34 @@ export function listAvailableDatasetsFromStac(
         });
       }
 
-      datasetMap.get(itemDataset)!.variants.push({
+      const variantEntry: DatasetVariantConfig = {
         variant: itemVariant,
         cid,
-      });
+      };
+
+      const bbox = item.bbox;
+      if (Array.isArray(bbox) && bbox.length >= 4) {
+        variantEntry.spatialExtent = {
+          bbox: [bbox[0], bbox[1], bbox[2], bbox[3]],
+        };
+      }
+
+      const startDt =
+        getStringProperty(item.properties, "start_datetime") ??
+        getStringProperty(item.properties, "datetime") ??
+        null;
+      const endDt =
+        getStringProperty(item.properties, "end_datetime") ??
+        getStringProperty(item.properties, "datetime") ??
+        null;
+      if (startDt != null || endDt != null) {
+        variantEntry.temporalExtent = {
+          start: startDt ?? null,
+          end: endDt ?? null,
+        };
+      }
+
+      datasetMap.get(itemDataset)!.variants.push(variantEntry);
     }
 
     for (const datasetName of datasetNamesFromLink) {

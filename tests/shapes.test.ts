@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { Dataset, DataArray } from "@dclimate/jaxray";
 import { points, circle, rectangle } from "../src/shapes/index.js";
-import { InvalidSelectionError, NoDataFoundError } from "../src/errors.js";
+import { InvalidSelectionError } from "../src/errors.js";
 import { isDatasetEmpty } from "../src/utils.js";
 
 // Helper to create a test dataset
@@ -69,8 +69,12 @@ describe("Shapes Module", () => {
       const result = await points(dataset, [40.0, 40.5], [-74.0, -73.5]);
 
       const tempVar = result.getVariable("temperature");
-      expect(Array.isArray(tempVar.data)).toBe(true);
-      expect((tempVar.data as any[]).length).toBeGreaterThan(0);
+      const tempData = tempVar.data;
+      expect(Array.isArray(tempData)).toBe(true);
+      if (!Array.isArray(tempData)) {
+        throw new Error("Expected temperature data to be an array");
+      }
+      expect(tempData.length).toBeGreaterThan(0);
     });
 
     it("should throw error if point arrays have different lengths", async () => {
@@ -87,18 +91,44 @@ describe("Shapes Module", () => {
 
     it("should support custom coordinate key names", async () => {
       const dataset2 = new Dataset({
-        temperature: new DataArray([20, 19, 18], {
-          dims: ["y"],
-          coords: { y: [40.0, 40.5, 41.0] },
-        }),
+        temperature: new DataArray(
+          [
+            [20, 19],
+            [18, 17],
+          ],
+          {
+            dims: ["y", "x"],
+            coords: { y: [40.0, 40.5], x: [0, 1] },
+          }
+        ),
       });
 
-      const result = await points(dataset2, [40.0], [0], {
+      const result = await points(dataset2, [40.5], [0], {
         latitudeKey: "y",
         longitudeKey: "x",
       });
 
-      expect(result).toBeDefined();
+      expect(result.getVariable("temperature").data).toEqual([18]);
+    });
+
+    it("should reject coordinate keys missing from the dataset", async () => {
+      await expect(
+        points(dataset, [40.0], [-74.0], {
+          latitudeKey: "lat",
+          longitudeKey: "lon",
+        })
+      ).rejects.toThrow(InvalidSelectionError);
+    });
+
+    it("should reject non-finite point coordinates", async () => {
+      await expect(points(dataset, [NaN], [-74.0])).rejects.toThrow(
+        InvalidSelectionError
+      );
+      await expect(
+        points(dataset, [40.0], [undefined as unknown as number], {
+          snapToGrid: false,
+        })
+      ).rejects.toThrow(InvalidSelectionError);
     });
 
     it("should throw error if EPSG CRS transformation requested", async () => {
@@ -282,7 +312,9 @@ describe("Shapes Module", () => {
       // Create a dense grid of points centered at (40.0, -74.0)
       const centerLat = 40.0;
       const centerLon = -74.0;
-      const radiusKm = 10;
+      // 0.1° of latitude is ~11.12 km, so the radius must exceed that for the
+      // circle to span rows above and below the center.
+      const radiusKm = 12;
 
       const latitudes = Array.from({ length: 21 }, (_, i) => 39.0 + (i * 0.1)); // 39.0 to 41.0
       const longitudes = Array.from({ length: 21 }, (_, i) => -75.0 + (i * 0.1)); // -75.0 to -73.0

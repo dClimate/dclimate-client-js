@@ -3,8 +3,15 @@ import type { SirenOptions } from "./siren/types.js";
 
 export type IpfsElements = IPFSELEMENTS_INTERFACE;
 
+export type ShardReadMode = "full" | "sparse";
+
 export interface ClientOptions {
   gatewayUrl?: string;
+  /**
+   * Pin catalog resolution to a specific root CID. Also disables the STAC
+   * server fast path, which only serves the latest catalog version.
+   */
+  rootCid?: string;
   ipfsElements?: IpfsElements;
   /**
    * STAC server URL for fast CID resolution.
@@ -25,6 +32,9 @@ export interface LoadDatasetOptions {
   ipfsElements?: IpfsElements;
   returnJaxrayDataset?: boolean;
   autoConcatenate?: boolean;
+  zarrGroup?: string;
+  /** Read only the requested shard entry on read-only sparse-store cache misses. */
+  shardReadMode?: ShardReadMode;
 }
 
 export interface PointQueryOptions {
@@ -34,10 +44,27 @@ export interface PointQueryOptions {
   tolerance?: number;
 }
 
-export interface TimeRange {
-  start: Date | string;
-  end: Date | string;
+export interface BoundsSelectionOptions {
+  latitudeKey?: string;
+  longitudeKey?: string;
 }
+
+export interface TimeRange {
+  // Numeric endpoints are accepted for raw numeric time axes (e.g. CF
+  // ordinals or unitless indices); Date/string for date-like axes.
+  start: number | Date | string;
+  end: number | Date | string;
+}
+
+export type BoundsSelection =
+  | readonly [west: number, south: number, east: number, north: number]
+  | {
+      west: number;
+      south: number;
+      east: number;
+      north: number;
+      options?: BoundsSelectionOptions;
+    };
 
 export interface GeoSelectionOptions {
   point?: {
@@ -45,6 +72,8 @@ export interface GeoSelectionOptions {
     longitude: number;
     options?: PointQueryOptions;
   };
+  bounds?: BoundsSelection;
+  boundsOptions?: BoundsSelectionOptions;
   timeRange?: TimeRange;
 }
 
@@ -61,6 +90,7 @@ export interface DatasetMetadata {
    * Dimension used for concatenation (e.g., "time")
    */
   concatDimension?: string;
+  zarrGroup?: string;
   path: string;
   cid: string;
   /**
@@ -76,4 +106,21 @@ export interface DatasetRequest {
   variant?: string;
   organization?: string;
   cid?: string;
+}
+
+export interface DataArrayObject {
+  data: unknown;
+  dims: string[];
+  coords: Record<string, unknown[]>;
+  attrs: Record<string, unknown>;
+  name?: string;
+  shape: number[];
+}
+
+export interface DatasetObject {
+  dataVars: Record<string, DataArrayObject>;
+  coords: Record<string, unknown[]>;
+  attrs: Record<string, unknown>;
+  dims: string[];
+  sizes: Record<string, number>;
 }

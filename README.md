@@ -19,6 +19,7 @@ The goal is to mirror the functionality of the Python `dclimate-zarr-client` pac
 - **No blockchain dependencies** – all resolution through HTTP APIs and IPFS
 - **TypeScript support** with full type definitions
 - **Dual build targets** for Node.js and browser environments
+- **OpenTelemetry hooks** for IPFS/Zarr open latency, status, and gateway attribution
 
 ## Installation
 
@@ -169,6 +170,35 @@ const [finalized, metadata] = await client.loadDataset({
 
 ```
 
+### ERA5 land datasets
+
+ERA5 and ERA5-Land datasets are separate dataset IDs within the ECMWF ERA5 collection. Use `listAvailableDatasets()` to inspect the exact names before loading.
+
+```typescript
+// Non-land ERA5 total precipitation
+const [precipitation, precipitationMetadata] = await client.loadDataset({
+  request: {
+    organization: "ecmwf",
+    collection: "era5",
+    dataset: "precipitation_total",
+    variant: "finalized"
+  }
+});
+
+// ERA5-Land total precipitation
+const [landPrecipitation, landPrecipitationMetadata] = await client.loadDataset({
+  request: {
+    organization: "ecmwf",
+    collection: "era5",
+    dataset: "precipitation_total_land",
+    variant: "finalized"
+  }
+});
+
+// ERA5-Land wind datasets follow the same pattern:
+// dataset: "wind_u_10m_land" or dataset: "wind_v_10m_land"
+```
+
 ### Selecting while loading
 
 ```typescript
@@ -184,6 +214,27 @@ const [subset, metadata] = await client.selectDataset({
     timeRange: {
       start: new Date("2023-02-01T00:00:00Z"),
       end: new Date("2023-02-05T00:00:00Z"),
+    },
+  }
+});
+```
+
+Use `bounds` for rectangular lon/lat selections. Tuple bounds are
+`[west, south, east, north]`.
+
+```typescript
+const [westernEurope, metadata] = await client.selectDataset({
+  request: {
+    organization: "ecmwf",
+    collection: "era5",
+    dataset: "temperature_2m",
+    variant: "finalized"
+  },
+  selection: {
+    bounds: [-12, 35, 16, 60],
+    timeRange: {
+      start: "2024-01-01T00:00:00Z",
+      end: "2024-01-07T23:00:00Z",
     },
   }
 });
@@ -278,6 +329,8 @@ const dataset = await client.loadDataset({
   options: {
     gatewayUrl: "https://custom-gateway.com",  // Optional: override client gateway
     cid: "bafyr4ia...",                         // Optional: load directly from CID
+    zarrGroup: "0",                             // Optional: open a specific Zarr group
+    shardReadMode: "sparse",                    // Optional: decode only requested shard entries
     returnJaxrayDataset: false,                 // Optional: return raw jaxray Dataset
     autoConcatenate: true                       // Optional: auto-merge variants (default: false)
   }
@@ -287,6 +340,23 @@ const dataset = await client.loadDataset({
 - **Dataset catalog** – includes both HTTP-backed dataset endpoints and direct CID entries. Use `listAvailableDatasets()` to explore all available datasets.
 - **Gateway** – set `gatewayUrl` on the client constructor or per-call in `loadDataset` options.
 - **Direct CID access** – supply `cid` in options to skip catalog resolution and load directly from IPFS.
+- **Grouped Zarr stores** – set `zarrGroup` when loading grouped sharded Zarr v2 stores such as pyramid level `"0"`.
+- **Sparse shard decoding** – read-only loads use `shardReadMode: "sparse"` by default to decode only requested shard entries. Set `shardReadMode: "full"` for dense reads that should reuse a fully decoded shard cache.
+
+### OpenTelemetry
+
+The client emits OpenTelemetry API spans and metrics around IPFS/Zarr dataset opens. This is passive by default: no telemetry is exported unless the application configures an OpenTelemetry SDK/provider.
+
+Emitted names include:
+
+- Span `dclimate_client.ipfs.load_zarr_dataset`
+- Span `dclimate_client.ipfs.open_jaxray_store`
+- Counter `dclimate_client.ipfs.dataset_open.requests`
+- Histogram `dclimate_client.ipfs.dataset_open.duration`
+- Counter `dclimate_client.ipfs.store_open.requests`
+- Histogram `dclimate_client.ipfs.store_open.duration`
+
+Metric attributes include the gateway URL, store type, and status. The dataset CID is only attached to the trace span to avoid high-cardinality metric labels.
 
 ## API Reference
 
