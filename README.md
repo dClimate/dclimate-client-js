@@ -96,29 +96,13 @@ const data = await client.getMetricData({
 });
 ```
 
-For x402 auth, install optional peer dependencies:
-
-```bash
-npm install @x402/core @x402/fetch @x402/evm
-```
-
-You can also configure a max payment cap so the client will reject expensive payment requirements before signing:
+Credentials can be passed explicitly instead of via environment variables:
 
 ```typescript
-import { DClimateClient, createEip1193Signer } from "@dclimate/dclimate-client-js";
-
-const signer = createEip1193Signer(window.ethereum);
-
 const client = new DClimateClient({
   siren: {
-    auth: {
-      type: "x402",
-      signer,
-      network: "base",
-      maxUsdCents: 10, // never pay more than $0.10
-      // or use maxAmountAtomic: "100000" for exact token-base units
-    },
-    x402BaseUrl: "https://x402-api-siren.dclimate.net",
+    auth: { type: "apiKey", apiKey: "sk-...", accountId: "acc-..." },
+    // baseUrl: "https://production-api-siren.dclimate.net/api", // override if needed
   },
 });
 ```
@@ -366,6 +350,9 @@ Metric attributes include the gateway URL, store type, and status. The dataset C
 - `loadDataset({ request, options })` - Load a dataset from the catalog
 - `selectDataset({ request, selection, options })` - Load and apply selections in one call
 - `listAvailableDatasets()` - Get the full dataset catalog
+- `getMetricData(query)` - Fetch Siren region metric data (requires `siren` configured)
+- `listRegions()` - List available Siren regions (requires `siren` configured)
+- `listMetrics()` - List available Siren metric names (requires `siren` configured)
 
 ### GeoTemporalDataset
 

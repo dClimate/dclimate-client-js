@@ -205,6 +205,72 @@ describe("SirenClient", () => {
         })
       ).rejects.toThrow(/missing requested metric/i);
     });
+
+    it.each([
+      ["null", null],
+      ["empty string", ""],
+      ["whitespace string", "   "],
+      ["boolean false", false],
+      ["non-numeric string", "n/a"],
+    ])("rejects %s values instead of coercing them to 0 (object path)", async (_label, badValue) => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ average_precip: { "2025-01-01": badValue } }),
+      });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      await expect(
+        client.getMetricData({
+          regionId: "region-1",
+          metric: "average_precip",
+          startDate: "2025-01-01",
+          endDate: "2025-01-03",
+        })
+      ).rejects.toThrow(SirenApiError);
+    });
+
+    it("rejects non-numeric values in the list-response path", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ date: "2025-01-01", value: null }],
+      });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      await expect(
+        client.getMetricData({
+          regionId: "region-1",
+          metric: "average_precip",
+          startDate: "2025-01-01",
+          endDate: "2025-01-03",
+        })
+      ).rejects.toThrow(/numeric 'value'/i);
+    });
+
+    it("accepts numeric strings from the API", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ average_precip: { "2025-01-01": "12.5" } }),
+      });
+
+      const client = new SirenClient({
+        auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+      });
+
+      const data = await client.getMetricData({
+        regionId: "region-1",
+        metric: "average_precip",
+        startDate: "2025-01-01",
+        endDate: "2025-01-01",
+      });
+
+      expect(data).toEqual([{ date: "2025-01-01", value: 12.5 }]);
+    });
   });
 
   describe("env var fallback", () => {
@@ -317,6 +383,29 @@ describe("SirenClient", () => {
     it("throws when calling listRegions without siren configured", async () => {
       const client = new DClimateClient();
       await expect(client.listRegions()).rejects.toThrow(SirenNotConfiguredError);
+    });
+
+    it("exposes listMetrics when siren is configured", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ok: true,
+        json: async () => ["average_precip", "max_temp"],
+      });
+
+      const client = new DClimateClient({
+        siren: {
+          auth: { type: "apiKey", apiKey: "sk-test", accountId: "acc-123" },
+        },
+      });
+
+      await expect(client.listMetrics()).resolves.toEqual([
+        "average_precip",
+        "max_temp",
+      ]);
+    });
+
+    it("throws when calling listMetrics without siren configured", async () => {
+      const client = new DClimateClient();
+      await expect(client.listMetrics()).rejects.toThrow(SirenNotConfiguredError);
     });
   });
 });

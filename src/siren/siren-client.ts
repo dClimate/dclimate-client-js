@@ -20,6 +20,25 @@ interface ResolvedApiKeyAuth {
 }
 
 /**
+ * Coerce a raw API value to a finite number, or return null if it is not a
+ * genuine numeric measurement. Unlike bare `Number(...)`, this rejects `null`,
+ * booleans, and empty/whitespace strings (all of which `Number` would silently
+ * turn into 0/1), so absent readings are never mistaken for real zeros.
+ */
+function toFiniteNumber(value: unknown): number | null {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed === "") return null;
+    const parsed = Number(trimmed);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+/**
  * Parse the Siren metric-data response format.
  * The API returns: `{ "metric_name": { "2026-01-01": 0.5, "2026-01-02": 1.2, ... } }`
  * We flatten this into an array of `{ date, value }` objects.
@@ -36,8 +55,8 @@ function parseMetricListItem(item: unknown): SirenMetricDataPoint {
     );
   }
 
-  const numericValue = Number(record.value);
-  if (!Number.isFinite(numericValue)) {
+  const numericValue = toFiniteNumber(record.value);
+  if (numericValue === null) {
     throw new SirenApiError(
       "Unexpected Siren metric list format: each item must include a numeric 'value'."
     );
@@ -84,8 +103,8 @@ function parseMetricResponse(
   }
 
   return Object.entries(timeSeries).map(([date, value]) => {
-    const numericValue = Number(value);
-    if (!Number.isFinite(numericValue)) {
+    const numericValue = toFiniteNumber(value);
+    if (numericValue === null) {
       throw new SirenApiError(
         `Unexpected Siren metric value type for date '${date}': expected numeric value.`
       );

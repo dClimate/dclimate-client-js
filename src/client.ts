@@ -116,6 +116,19 @@ export class DClimateClient {
     return this.sirenClient.listRegions();
   }
 
+  /**
+   * List available Siren metric names.
+   * Requires `siren` to be configured in ClientOptions.
+   */
+  async listMetrics(): Promise<string[]> {
+    if (!this.sirenClient) {
+      throw new SirenNotConfiguredError(
+        "Siren is not configured. Pass a `siren` option to the DClimateClient constructor."
+      );
+    }
+    return this.sirenClient.listMetrics();
+  }
+
   async loadDataset({
     request,
     options = {
