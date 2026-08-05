@@ -125,6 +125,14 @@ export interface DatasetVersionsRequest {
   filters?: VersionFilters;
 }
 
+export interface DatasetVersionRequest {
+  collection: string;
+  dataset: string;
+  commitId: string;
+  variant?: string;
+  organization?: string;
+}
+
 export interface DataArrayObject {
   data: unknown;
   dims: string[];

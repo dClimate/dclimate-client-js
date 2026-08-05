@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DClimateClient } from "../src/client.js";
 import { VersionHistoryUnavailableError } from "../src/errors.js";
+import { VersionApiError } from "../src/errors.js";
 import {
   resolveDatasetFromStac,
   type StacCatalog,
@@ -169,6 +170,66 @@ describe("STAC release discovery", () => {
     );
   });
 
+  it.each([
+    "https://hydrogen.dclimate.net/api/datasets/aigfs-wind-u/versions",
+    "https://tritium.dclimate.net/api/datasets/aigfs-wind-u/versions",
+  ])("gets an exact version through the STAC-directed service %s", async (versionsApi) => {
+    const commitId = "commit/with spaces?and=query#fragment";
+    const routedItem = {
+      ...item,
+      properties: { ...properties, "dclimate:versions_api": versionsApi },
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input.toString();
+      if (url === "https://stac.test/search") {
+        return response({
+          type: "FeatureCollection",
+          features: [routedItem],
+          links: [],
+        });
+      }
+      return response({ dataset: "aigfs-wind-u", cid: "bafy-exact" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new DClimateClient({ stacServerUrl: "https://stac.test" });
+
+    const result = await client.getDatasetVersion({
+      collection: "noaa_aigfs",
+      dataset: "wind_u_forecast",
+      variant: "operational",
+      commitId,
+    });
+
+    expect(result.cid).toBe("bafy-exact");
+    expect(fetchMock.mock.calls[1][0].toString()).toBe(
+      `${versionsApi}/commit%2Fwith%20spaces%3Fand%3Dquery%23fragment`
+    );
+  });
+
+  it("propagates exact-version service errors", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (input.toString() === "https://stac.test/search") {
+        return response({ type: "FeatureCollection", features: [item], links: [] });
+      }
+      return {
+        ...response({ detail: "unavailable" }),
+        ok: false,
+        status: 503,
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new DClimateClient({ stacServerUrl: "https://stac.test" });
+
+    await expect(
+      client.getDatasetVersion({
+        collection: "noaa_aigfs",
+        dataset: "wind_u_forecast",
+        variant: "operational",
+        commitId: "commit-1",
+      })
+    ).rejects.toMatchObject<Partial<VersionApiError>>({ status: 503 });
+  });
+
   it("reports when a STAC item has no version-history capability", async () => {
     vi.stubGlobal(
       "fetch",
@@ -190,6 +251,15 @@ describe("STAC release discovery", () => {
         collection: "noaa_aigfs",
         dataset: "wind_u_forecast",
         variant: "operational",
+      })
+    ).rejects.toBeInstanceOf(VersionHistoryUnavailableError);
+
+    await expect(
+      client.getDatasetVersion({
+        collection: "noaa_aigfs",
+        dataset: "wind_u_forecast",
+        variant: "operational",
+        commitId: "commit-1",
       })
     ).rejects.toBeInstanceOf(VersionHistoryUnavailableError);
   });

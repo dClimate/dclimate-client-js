@@ -4,6 +4,7 @@ import {
   ClientOptions,
   DatasetMetadata,
   DatasetRequest,
+  DatasetVersionRequest,
   DatasetVersionsRequest,
   GeoSelectionOptions,
   LoadDatasetOptions,
@@ -34,8 +35,14 @@ import {
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 import { SirenClient } from "./siren/siren-client.js";
-import { listVersionsFromUrl } from "./versions/version-client.js";
-import type { DatasetVersionListing } from "./versions/types.js";
+import {
+  getExactVersionFromUrl,
+  listVersionsFromUrl,
+} from "./versions/version-client.js";
+import type {
+  DatasetVersion,
+  DatasetVersionListing,
+} from "./versions/types.js";
 
 function normalizeZarrGroup(group?: string): string | undefined {
   const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -163,6 +170,27 @@ export class DClimateClient {
       );
     }
     return listVersionsFromUrl(resolved.versionsApi, filters);
+  }
+
+  async getDatasetVersion({
+    collection,
+    dataset,
+    commitId,
+    variant,
+    organization,
+  }: DatasetVersionRequest): Promise<DatasetVersion> {
+    const resolved = await this.resolveDatasetDetails({
+      collection,
+      dataset,
+      variant,
+      organization,
+    });
+    if (!resolved.versionsApi) {
+      throw new VersionHistoryUnavailableError(
+        `Version history is not available for ${collection}/${dataset}/${resolved.variant}.`
+      );
+    }
+    return getExactVersionFromUrl(resolved.versionsApi, commitId);
   }
 
   /**

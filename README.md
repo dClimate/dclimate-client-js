@@ -94,6 +94,15 @@ const versions = await client.listDatasetVersions({
 for (const release of versions.versions) {
   console.log(release.versionLabel, release.cid);
 }
+
+const exactVersion = await client.getDatasetVersion({
+  collection: "noaa_aigfs",
+  dataset: "wind_u_forecast",
+  variant: "operational",
+  commitId: "commit-id",
+});
+
+console.log(exactVersion.cid);
 ```
 
 The low-level `listVersionsFromUrl`, `getExactVersionFromUrl`, and
