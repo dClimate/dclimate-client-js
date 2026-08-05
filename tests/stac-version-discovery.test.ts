@@ -21,6 +21,7 @@ const properties = {
   "dclimate:version_label": "2026-08",
   "dclimate:is_citable": true,
   "dclimate:retention_class": "permanent",
+  "dclimate:default_zarr_group": "1",
 };
 
 const item = {
@@ -30,7 +31,12 @@ const item = {
   collection: "noaa_aigfs",
   properties,
   geometry: null,
-  assets: { data: { href: "ipfs://bafy-current" } },
+  assets: {
+    data: {
+      href: "ipfs://bafy-current",
+      "dclimate:zarr_group": "/0/",
+    },
+  },
   links: [],
 };
 
@@ -67,6 +73,7 @@ describe("STAC release discovery", () => {
       commitId: "commit-1",
       isCitable: true,
       retentionClass: "permanent",
+      zarrGroup: "/0/",
     });
   });
 
@@ -99,6 +106,40 @@ describe("STAC release discovery", () => {
     expect(resolved.versionsApi).toBe(properties["dclimate:versions_api"]);
     expect(resolved.provenanceApi).toBe(properties["dclimate:provenance_api"]);
     expect(resolved.citationApi).toBe(properties["dclimate:citation_api"]);
+    expect(resolved.zarrGroup).toBe("/0/");
+  });
+
+  it("falls back to the item default when the data asset has no group", () => {
+    const unannotatedAssetItem = {
+      ...item,
+      assets: { data: { href: "ipfs://bafy-current" } },
+    };
+    const catalog: StacCatalog = {
+      type: "Catalog",
+      stac_version: "1.0.0",
+      id: "root",
+      links: [],
+      collections: [
+        {
+          type: "Collection",
+          stac_version: "1.0.0",
+          id: "noaa_aigfs",
+          organizationId: "noaa",
+          links: [],
+          items: [unannotatedAssetItem],
+        },
+      ],
+    };
+
+    expect(
+      resolveDatasetFromStac(
+        catalog,
+        "noaa_aigfs",
+        "wind_u_forecast",
+        "operational",
+        "noaa"
+      ).zarrGroup
+    ).toBe("1");
   });
 
   it("lists versions using the full URL advertised by STAC", async () => {

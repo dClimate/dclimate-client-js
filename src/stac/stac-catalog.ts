@@ -85,6 +85,7 @@ export interface StacAsset {
   type?: string;
   title?: string;
   roles?: string[];
+  [key: string]: unknown;
 }
 
 export interface StacItem {
@@ -193,6 +194,7 @@ export interface ConcatenableStacItem {
   cid: string;
   concatPriority: number;
   concatDimension: string;
+  zarrGroup?: string;
 }
 
 export interface StacOrganization {
@@ -208,6 +210,17 @@ export interface ResolvedDatasetFromStac extends StacReleaseMetadata {
   organizationId?: string;
   dataset: string;
   variant: string;
+  zarrGroup?: string;
+}
+
+export function getStacZarrGroup(
+  asset: Record<string, unknown> | undefined,
+  properties: Record<string, unknown> | undefined
+): string | undefined {
+  return (
+    getStringProperty(asset, "dclimate:zarr_group") ??
+    getStringProperty(properties, "dclimate:default_zarr_group")
+  );
 }
 
 // ============================================================================
@@ -725,6 +738,7 @@ export function resolveDatasetFromStac(
     organizationId,
     dataset,
     variant: resolvedVariant || "default",
+    zarrGroup: getStacZarrGroup(selectedItem.assets.data, selectedItem.properties),
     ...getStacReleaseMetadata(selectedItem.properties),
   };
 }
@@ -813,6 +827,7 @@ export function getConcatenableItemsFromStac(
       cid,
       concatPriority: priority,
       concatDimension: dimension,
+      zarrGroup: getStacZarrGroup(dataAsset, item.properties),
     });
   }
 

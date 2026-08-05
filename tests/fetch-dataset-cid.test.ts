@@ -24,6 +24,59 @@ describe("loadDataset CID resolution", () => {
   });
 
   describe("STAC catalog resolution", () => {
+    it("uses the STAC data asset group unless the caller overrides it", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          text: async () => "",
+          json: async () => ({
+            type: "FeatureCollection",
+            links: [],
+            features: [
+              {
+                type: "Feature",
+                id: "test_grouped-pyramid-default",
+                collection: "test_grouped",
+                properties: {
+                  "dclimate:dataset_id": "pyramid",
+                  "dclimate:variant": "default",
+                  "dclimate:default_zarr_group": "1",
+                },
+                assets: {
+                  data: {
+                    href: "ipfs://bafygrouped",
+                    "dclimate:zarr_group": "/0/",
+                  },
+                },
+              },
+            ],
+          }),
+        }))
+      );
+      const client = new DClimateClient({ stacServerUrl: "https://stac.test" });
+
+      const [, discoveredMetadata] = await client.loadDataset({
+        request: { collection: "test_grouped", dataset: "pyramid" },
+      });
+      expect(openDatasetFromCidMock).toHaveBeenLastCalledWith(
+        "bafygrouped",
+        expect.objectContaining({ zarrGroup: "0" })
+      );
+      expect(discoveredMetadata.zarrGroup).toBe("0");
+
+      const [, overriddenMetadata] = await client.loadDataset({
+        request: { collection: "test_grouped", dataset: "pyramid" },
+        options: { zarrGroup: "/2/" },
+      });
+      expect(openDatasetFromCidMock).toHaveBeenLastCalledWith(
+        "bafygrouped",
+        expect.objectContaining({ zarrGroup: "2" })
+      );
+      expect(overriddenMetadata.zarrGroup).toBe("2");
+    });
+
     it("resolves CID from STAC for known dataset", async () => {
       const client = new DClimateClient();
       await client.loadDataset({

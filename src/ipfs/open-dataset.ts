@@ -26,6 +26,13 @@ export function normalizeZarrGroup(group?: string): string | undefined {
   return normalized || undefined;
 }
 
+function requiresExplicitZarrGroup(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes("require an explicit group option")
+  );
+}
+
 export async function openDatasetFromCid(
   cid: string,
   options: OpenDatasetOptions = {}
@@ -85,9 +92,19 @@ export async function openDatasetFromCid(
           }
         );
 
-        const dataset = zarrGroup
-          ? await Dataset.open_zarr(store, { group: zarrGroup })
-          : await Dataset.open_zarr(store);
+        let dataset: Dataset;
+        if (zarrGroup) {
+          dataset = await Dataset.open_zarr(store, { group: zarrGroup });
+        } else {
+          try {
+            dataset = await Dataset.open_zarr(store);
+          } catch (error) {
+            if (!requiresExplicitZarrGroup(error)) throw error;
+            dataset = await Dataset.open_zarr(store, { group: "0" });
+            dataset.attrs._ipfs_zarr_group = "0";
+          }
+        }
+        if (zarrGroup) dataset.attrs._ipfs_zarr_group = zarrGroup;
         status = "ok";
         return dataset;
       } catch (error) {

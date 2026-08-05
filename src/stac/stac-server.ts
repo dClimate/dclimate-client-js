@@ -12,7 +12,11 @@ import type {
   DatasetVariantConfig,
   StacReleaseMetadata,
 } from "./stac-catalog.js";
-import { getStacReleaseMetadata, getStringProperty } from "./stac-catalog.js";
+import {
+  getStacReleaseMetadata,
+  getStacZarrGroup,
+  getStringProperty,
+} from "./stac-catalog.js";
 
 export const DEFAULT_STAC_SERVER_URL = "https://api.stac.dclimate.net";
 
@@ -36,7 +40,10 @@ export interface StacServerItem {
   id: string;
   collection?: string;
   properties: Record<string, unknown>;
-  assets: Record<string, { href: string; type?: string; title?: string }>;
+  assets: Record<
+    string,
+    { href: string; type?: string; title?: string; [key: string]: unknown }
+  >;
 }
 
 export interface ResolvedCidFromServer extends StacReleaseMetadata {
@@ -44,6 +51,7 @@ export interface ResolvedCidFromServer extends StacReleaseMetadata {
   collectionId: string;
   dataset: string;
   variant: string;
+  zarrGroup?: string;
 }
 
 const MAX_STAC_SEARCH_PAGES = 50;
@@ -215,7 +223,8 @@ export async function resolveCidFromStacServer(
   }
 
   // Extract CID from asset
-  const href = selectedItem.assets?.data?.href || "";
+  const dataAsset = selectedItem.assets?.data;
+  const href = dataAsset?.href || "";
   const advertisedCid = getStringProperty(
     selectedItem.properties,
     "dclimate:latest_dataset_cid"
@@ -234,6 +243,7 @@ export async function resolveCidFromStacServer(
     collectionId: collection,
     dataset,
     variant: resolvedVariant,
+    zarrGroup: getStacZarrGroup(dataAsset, selectedItem.properties),
     ...getStacReleaseMetadata(selectedItem.properties),
   };
 }

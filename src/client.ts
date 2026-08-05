@@ -192,7 +192,7 @@ export class DClimateClient {
   }): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
-    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
+    const explicitZarrGroup = normalizeZarrGroup(options.zarrGroup);
 
 
     if (request.cid) {
@@ -200,9 +200,12 @@ export class DClimateClient {
       const dataset = await openDatasetFromCid(request.cid, {
         gatewayUrl,
         ipfsElements,
-        zarrGroup,
+        zarrGroup: explicitZarrGroup,
         shardReadMode: options.shardReadMode,
       });
+      const openedZarrGroup =
+        explicitZarrGroup ??
+        normalizeZarrGroup(dataset.attrs?._ipfs_zarr_group as string | undefined);
 
       const metadata: DatasetMetadata = {
         dataset: "",
@@ -213,7 +216,7 @@ export class DClimateClient {
         path: "",
         cid: request.cid,
         fetchedAt: new Date(),
-        ...(zarrGroup ? { zarrGroup } : {}),
+        ...(openedZarrGroup ? { zarrGroup: openedZarrGroup } : {}),
       };
     if (options.returnJaxrayDataset) {
       return [dataset, metadata];
@@ -299,6 +302,7 @@ export class DClimateClient {
     const metadataVariant = resolved.variant || "";
     const metadataOrganization =
       resolved.organizationId ?? resolvedOrganization;
+    const zarrGroup = explicitZarrGroup ?? normalizeZarrGroup(resolved.zarrGroup);
 
     // Build path from resolved names
     const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
@@ -376,7 +380,7 @@ export class DClimateClient {
     }
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
-    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
+    const explicitZarrGroup = normalizeZarrGroup(options.zarrGroup);
 
     // Order by concatPriority so metadata (concatenatedVariants, cid)
     // reflects the same order the data is concatenated in.
@@ -387,6 +391,8 @@ export class DClimateClient {
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
       orderedVariants.map(async (variantConfig) => {
+        const zarrGroup =
+          explicitZarrGroup ?? normalizeZarrGroup(variantConfig.zarrGroup);
         // Load the dataset using the CID from STAC
         const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
@@ -417,7 +423,7 @@ export class DClimateClient {
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "stac_concatenated",
       fetchedAt: new Date(),
-      ...(zarrGroup ? { zarrGroup } : {}),
+      ...(explicitZarrGroup ? { zarrGroup: explicitZarrGroup } : {}),
     };
 
     if (options.returnJaxrayDataset) {
