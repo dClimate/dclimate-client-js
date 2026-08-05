@@ -4,12 +4,17 @@ import {
   ClientOptions,
   DatasetMetadata,
   DatasetRequest,
+  DatasetVersionsRequest,
   GeoSelectionOptions,
   LoadDatasetOptions,
 } from "./types.js";
 import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
-import { DatasetNotFoundError, SirenNotConfiguredError } from "./errors.js";
+import {
+  DatasetNotFoundError,
+  SirenNotConfiguredError,
+  VersionHistoryUnavailableError,
+} from "./errors.js";
 import { normalizeSegment } from "./utils.js";
 
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
@@ -20,6 +25,7 @@ import {
   listAvailableDatasetsFromStac,
   type StacCatalog,
   type ConcatenableStacItem,
+  type ResolvedDatasetFromStac,
 } from "./stac/index.js";
 import { DatasetCatalog } from "./stac/stac-catalog.js";
 import {
@@ -28,6 +34,8 @@ import {
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 import { SirenClient } from "./siren/siren-client.js";
+import { listVersionsFromUrl } from "./versions/version-client.js";
+import type { DatasetVersionListing } from "./versions/types.js";
 
 function normalizeZarrGroup(group?: string): string | undefined {
   const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -87,6 +95,74 @@ export class DClimateClient {
 
   async listCatalogEntries(): Promise<DatasetCatalog> {
     return this.listAvailableDatasets();
+  }
+
+  private async resolveDatasetDetails(
+    request: DatasetRequest,
+    gatewayUrl: string = this.gatewayUrl
+  ): Promise<ResolvedDatasetFromStac> {
+    if (!request.collection || !request.dataset) {
+      throw new DatasetNotFoundError(
+        "Collection and dataset names must be provided."
+      );
+    }
+
+    const collection =
+      request.organization &&
+      !request.collection.startsWith(`${request.organization}_`)
+        ? `${request.organization}_${request.collection}`
+        : request.collection;
+
+    if (this.stacServerUrl) {
+      try {
+        const resolved = await resolveCidFromStacServer(
+          collection,
+          request.dataset,
+          request.variant,
+          this.stacServerUrl
+        );
+        return {
+          ...resolved,
+          organizationId:
+            request.organization ??
+            (resolved.collectionId.includes("_")
+              ? resolved.collectionId.split("_")[0]
+              : undefined),
+        };
+      } catch {
+        // Fall through to the IPFS-hosted STAC catalog.
+      }
+    }
+
+    const catalog = await this.getStacCatalog(gatewayUrl);
+    return resolveDatasetFromStac(
+      catalog,
+      collection,
+      request.dataset,
+      request.variant,
+      request.organization
+    );
+  }
+
+  async listDatasetVersions({
+    collection,
+    dataset,
+    variant,
+    organization,
+    filters,
+  }: DatasetVersionsRequest): Promise<DatasetVersionListing> {
+    const resolved = await this.resolveDatasetDetails({
+      collection,
+      dataset,
+      variant,
+      organization,
+    });
+    if (!resolved.versionsApi) {
+      throw new VersionHistoryUnavailableError(
+        `Version history is not available for ${collection}/${dataset}/${resolved.variant}.`
+      );
+    }
+    return listVersionsFromUrl(resolved.versionsApi, filters);
   }
 
   /**
@@ -151,7 +227,7 @@ export class DClimateClient {
 
     const normalizedDatasetKey = normalizeSegment(request.dataset);
     const autoConcatenate = options.autoConcatenate;
-    let resolvedOrganization = request.organization;
+    const resolvedOrganization = request.organization;
     let resolvedCollection = request.collection;
 
     if (
@@ -209,50 +285,20 @@ export class DClimateClient {
     }
 
     // Fall back to single variant loading
-    let cid: string | null = null;
-    let metadataDataset = request.dataset;
-    let metadataCollection = resolvedCollection || request.collection;
-    let metadataVariant = request.variant ?? "";
-    let metadataOrganization = resolvedOrganization;
-
-    // Try STAC server first (faster, avoids loading IPFS catalog)
-    if (this.stacServerUrl && resolvedCollection) {
-      try {
-        const serverResolved = await resolveCidFromStacServer(
-          resolvedCollection,
-          request.dataset,
-          request.variant,
-          this.stacServerUrl
-        );
-        cid = serverResolved.cid;
-        metadataCollection = serverResolved.collectionId;
-        metadataVariant = serverResolved.variant || "";
-        metadataDataset = serverResolved.dataset;
-      } catch {
-        // Fall back to IPFS catalog
-      }
-    }
-
-    // Fallback: Use STAC catalog resolution from IPFS
-    if (!cid) {
-      const catalog = await this.getStacCatalog(gatewayUrl);
-
-      const resolved = resolveDatasetFromStac(
-        catalog,
-        resolvedCollection || request.collection || "",
-        request.dataset,
-        request.variant,
-        resolvedOrganization
-      );
-
-      // Update metadata with resolved values
-      cid = resolved.cid;
-      metadataCollection = resolved.collectionId;
-      metadataVariant = resolved.variant || "";
-      resolvedOrganization = resolved.organizationId ?? resolvedOrganization;
-      metadataOrganization = resolved.organizationId ?? resolvedOrganization;
-      metadataDataset = request.dataset;
-    }
+    const resolved = await this.resolveDatasetDetails(
+      {
+        ...request,
+        collection: resolvedCollection || request.collection,
+        organization: resolvedOrganization,
+      },
+      gatewayUrl
+    );
+    const cid = resolved.cid;
+    const metadataDataset = resolved.dataset;
+    const metadataCollection = resolved.collectionId;
+    const metadataVariant = resolved.variant || "";
+    const metadataOrganization =
+      resolved.organizationId ?? resolvedOrganization;
 
     // Build path from resolved names
     const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
@@ -274,6 +320,20 @@ export class DClimateClient {
       cid: cid,
       source: "stac",
       fetchedAt: new Date(),
+      ...(resolved.versionsApi ? { versionsApi: resolved.versionsApi } : {}),
+      ...(resolved.provenanceApi
+        ? { provenanceApi: resolved.provenanceApi }
+        : {}),
+      ...(resolved.citationApi ? { citationApi: resolved.citationApi } : {}),
+      ...(resolved.streamId ? { streamId: resolved.streamId } : {}),
+      ...(resolved.commitId ? { commitId: resolved.commitId } : {}),
+      ...(resolved.versionLabel ? { versionLabel: resolved.versionLabel } : {}),
+      ...(resolved.isCitable !== undefined
+        ? { isCitable: resolved.isCitable }
+        : {}),
+      ...(resolved.retentionClass
+        ? { retentionClass: resolved.retentionClass }
+        : {}),
       ...(zarrGroup ? { zarrGroup } : {}),
     };
 

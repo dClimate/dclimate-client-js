@@ -73,6 +73,34 @@ const slice = await point.timeRange({
 console.log(await slice.toRecords("precipitation"));
 ```
 
+### Dataset version history
+
+For datasets that advertise version history in STAC, the client follows the
+item's `dclimate:versions_api` URL. STAC therefore selects Hydrogen, Tritium,
+or a future version service without a client-side dataset routing table.
+
+```typescript
+const versions = await client.listDatasetVersions({
+  collection: "noaa_aigfs",
+  dataset: "wind_u_forecast",
+  variant: "operational",
+  filters: {
+    anchored: true,
+    isCitable: true,
+    versionLabel: "2026-08",
+  },
+});
+
+for (const release of versions.versions) {
+  console.log(release.versionLabel, release.cid);
+}
+```
+
+The low-level `listVersionsFromUrl`, `getExactVersionFromUrl`, and
+`getCitationFromUrl` helpers are also exported for applications that already
+have the complete URLs. Items backed by hard-coded CIDs may not advertise a
+version-history service.
+
 ### Siren REST API usage
 
 Use Siren methods by configuring `siren` in the client options.

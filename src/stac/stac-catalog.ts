@@ -140,6 +140,40 @@ export function getStringProperty(
   return typeof value === "string" ? value : undefined;
 }
 
+function getBooleanProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): boolean | undefined {
+  const value = properties?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+export interface StacReleaseMetadata {
+  versionsApi?: string;
+  provenanceApi?: string;
+  citationApi?: string;
+  streamId?: string;
+  commitId?: string;
+  versionLabel?: string;
+  isCitable?: boolean;
+  retentionClass?: string;
+}
+
+export function getStacReleaseMetadata(
+  properties: Record<string, unknown> | undefined
+): StacReleaseMetadata {
+  return {
+    versionsApi: getStringProperty(properties, "dclimate:versions_api"),
+    provenanceApi: getStringProperty(properties, "dclimate:provenance_api"),
+    citationApi: getStringProperty(properties, "dclimate:citation_api"),
+    streamId: getStringProperty(properties, "dclimate:stream_id"),
+    commitId: getStringProperty(properties, "dclimate:commit_id"),
+    versionLabel: getStringProperty(properties, "dclimate:version_label"),
+    isCitable: getBooleanProperty(properties, "dclimate:is_citable"),
+    retentionClass: getStringProperty(properties, "dclimate:retention_class"),
+  };
+}
+
 function getNumberProperty(
   properties: Record<string, unknown> | undefined,
   key: string
@@ -168,7 +202,7 @@ export interface StacOrganization {
   catalog: StacCatalog;
 }
 
-export interface ResolvedDatasetFromStac {
+export interface ResolvedDatasetFromStac extends StacReleaseMetadata {
   cid: string;
   collectionId: string;
   organizationId?: string;
@@ -691,6 +725,7 @@ export function resolveDatasetFromStac(
     organizationId,
     dataset,
     variant: resolvedVariant || "default",
+    ...getStacReleaseMetadata(selectedItem.properties),
   };
 }
 

@@ -10,8 +10,9 @@ import type {
   CatalogDataset,
   DatasetCatalog,
   DatasetVariantConfig,
+  StacReleaseMetadata,
 } from "./stac-catalog.js";
-import { getStringProperty } from "./stac-catalog.js";
+import { getStacReleaseMetadata, getStringProperty } from "./stac-catalog.js";
 
 export const DEFAULT_STAC_SERVER_URL = "https://api.stac.dclimate.net";
 
@@ -38,7 +39,7 @@ export interface StacServerItem {
   assets: Record<string, { href: string; type?: string; title?: string }>;
 }
 
-export interface ResolvedCidFromServer {
+export interface ResolvedCidFromServer extends StacReleaseMetadata {
   cid: string;
   collectionId: string;
   dataset: string;
@@ -215,17 +216,25 @@ export async function resolveCidFromStacServer(
 
   // Extract CID from asset
   const href = selectedItem.assets?.data?.href || "";
-  if (!href) {
+  const advertisedCid = getStringProperty(
+    selectedItem.properties,
+    "dclimate:latest_dataset_cid"
+  );
+  const rawCid = href || advertisedCid || "";
+  if (!rawCid) {
     throw new Error(`Item '${selectedItem.id}' has no data asset`);
   }
 
-  const cid = href.startsWith("ipfs://") ? href.replace("ipfs://", "") : href;
+  const cid = rawCid.startsWith("ipfs://")
+    ? rawCid.replace("ipfs://", "")
+    : rawCid;
 
   return {
     cid,
     collectionId: collection,
     dataset,
     variant: resolvedVariant,
+    ...getStacReleaseMetadata(selectedItem.properties),
   };
 }
 

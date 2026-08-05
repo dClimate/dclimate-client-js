@@ -14,6 +14,7 @@ export {
   type StacCatalogOptions,
   type ConcatenableStacItem,
   type ResolvedDatasetFromStac,
+  type StacReleaseMetadata,
   type StacOrganization,
   type SpatialExtent,
   type TemporalExtent,

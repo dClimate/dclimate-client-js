@@ -14,3 +14,11 @@ export class NoDataFoundError extends DClimateClientError {}
 export class SirenApiError extends DClimateClientError {}
 
 export class SirenNotConfiguredError extends DClimateClientError {}
+
+export class VersionHistoryUnavailableError extends DClimateClientError {}
+
+export class VersionApiError extends DClimateClientError {
+  constructor(message: string, public status?: number) {
+    super(message);
+  }
+}
