@@ -114,7 +114,7 @@ Two things differ from `GeoTemporalDataset`, because the data model differs:
 const hotDays = await stations
   .nearest(29.98, -95.36)
   .timeRange({ start: "2025-01-01", end: "2025-12-31" })
-  .where({ element: "TMAX", op: "gt", value: 3500 }) // hundredths of °C
+  .where({ element: "TMAX", op: "gt", value: 350 }) // tenths of °C, so 35 °C
   .rows();
 ```
 
