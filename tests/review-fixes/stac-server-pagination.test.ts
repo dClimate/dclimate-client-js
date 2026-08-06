@@ -112,20 +112,26 @@ describe("resolveCidFromStacServer pagination", () => {
     // Every page advertises another next link, so the walk can never terminate
     // naturally. Rather than silently truncating (and reporting the target as
     // missing), it must throw so callers can fall back to the full catalog.
-    const fetchMock = vi.fn(
-      async () =>
-        ({
+    let requestNumber = 0;
+    const fetchMock = vi.fn(async () => {
+      requestNumber += 1;
+      return {
           ok: true,
           status: 200,
           statusText: "OK",
           json: async () => ({
             type: "FeatureCollection",
             features: [feature(0)],
-            links: [{ rel: "next", href: `${serverUrl}/search?page=next` }],
+            links: [
+              {
+                rel: "next",
+                href: `${serverUrl}/search?page=${requestNumber + 1}`,
+              },
+            ],
           }),
           text: async () => "",
-        }) as Response,
-    );
+        } as Response;
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
