@@ -49,7 +49,7 @@ describe("openDatasetFromCid", () => {
     expect(dataset.attrs).toEqual({ _ipfs_zarr_group: "0" });
   });
 
-  it("safely retries group zero when jaxray reports an ambiguous grouped root", async () => {
+  it("requires an explicit group when jaxray reports an ambiguous grouped root", async () => {
     const store = { kind: "grouped-store" };
     const dataset = { kind: "dataset", attrs: {} as Record<string, unknown> };
     openIpfsStoreMock.mockResolvedValue({ store });
@@ -61,11 +61,12 @@ describe("openDatasetFromCid", () => {
       )
       .mockResolvedValueOnce(dataset);
 
-    await expect(openDatasetFromCid("bafygrouped")).resolves.toBe(dataset);
+    await expect(openDatasetFromCid("bafygrouped")).rejects.toThrow(
+      "pass zarrGroup explicitly"
+    );
 
     expect(openZarrMock).toHaveBeenNthCalledWith(1, store);
-    expect(openZarrMock).toHaveBeenNthCalledWith(2, store, { group: "0" });
-    expect(dataset.attrs._ipfs_zarr_group).toBe("0");
+    expect(openZarrMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses caller supplied IPFS elements", async () => {

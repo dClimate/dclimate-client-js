@@ -11,10 +11,11 @@ import type {
   DatasetCatalog,
   DatasetVariantConfig,
   StacReleaseMetadata,
+  StacZarrResolution,
 } from "./stac-catalog.js";
 import {
   getStacReleaseMetadata,
-  getStacZarrGroup,
+  getStacZarrResolutions,
   getStringProperty,
 } from "./stac-catalog.js";
 
@@ -51,7 +52,7 @@ export interface ResolvedCidFromServer extends StacReleaseMetadata {
   collectionId: string;
   dataset: string;
   variant: string;
-  zarrGroup?: string;
+  zarrResolutions: StacZarrResolution[];
 }
 
 const MAX_STAC_SEARCH_PAGES = 50;
@@ -223,7 +224,12 @@ export async function resolveCidFromStacServer(
   }
 
   // Extract CID from asset
-  const dataAsset = selectedItem.assets?.data;
+  const zarrResolutions = getStacZarrResolutions(selectedItem.assets);
+  const dataAsset =
+    selectedItem.assets?.data ??
+    (zarrResolutions[0]
+      ? selectedItem.assets[zarrResolutions[0].assetKey]
+      : undefined);
   const href = dataAsset?.href || "";
   const advertisedCid = getStringProperty(
     selectedItem.properties,
@@ -243,7 +249,7 @@ export async function resolveCidFromStacServer(
     collectionId: collection,
     dataset,
     variant: resolvedVariant,
-    zarrGroup: getStacZarrGroup(dataAsset, selectedItem.properties),
+    zarrResolutions,
     ...getStacReleaseMetadata(selectedItem.properties),
   };
 }

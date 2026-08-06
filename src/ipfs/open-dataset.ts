@@ -2,6 +2,7 @@ import { Dataset, openIpfsStore } from "@dclimate/jaxray";
 import type { IPFSELEMENTS_INTERFACE } from "@dclimate/jaxray";
 import { DEFAULT_IPFS_GATEWAY } from "../constants.js";
 import type { ShardReadMode } from "../types.js";
+import { MultiresolutionSelectionRequiredError } from "../errors.js";
 import {
   classifyRetrievalError,
   recordDatasetOpen,
@@ -100,8 +101,9 @@ export async function openDatasetFromCid(
             dataset = await Dataset.open_zarr(store);
           } catch (error) {
             if (!requiresExplicitZarrGroup(error)) throw error;
-            dataset = await Dataset.open_zarr(store, { group: "0" });
-            dataset.attrs._ipfs_zarr_group = "0";
+            throw new MultiresolutionSelectionRequiredError(
+              "This Zarr store has multiple groups; pass zarrGroup explicitly."
+            );
           }
         }
         if (zarrGroup) dataset.attrs._ipfs_zarr_group = zarrGroup;

@@ -194,7 +194,7 @@ export interface ConcatenableStacItem {
   cid: string;
   concatPriority: number;
   concatDimension: string;
-  zarrGroup?: string;
+  zarrResolutions: StacZarrResolution[];
 }
 
 export interface StacOrganization {
@@ -210,16 +210,31 @@ export interface ResolvedDatasetFromStac extends StacReleaseMetadata {
   organizationId?: string;
   dataset: string;
   variant: string;
-  zarrGroup?: string;
+  zarrResolutions: StacZarrResolution[];
 }
 
-export function getStacZarrGroup(
-  asset: Record<string, unknown> | undefined,
-  properties: Record<string, unknown> | undefined
-): string | undefined {
-  return (
-    getStringProperty(asset, "dclimate:zarr_group") ??
-    getStringProperty(properties, "dclimate:default_zarr_group")
+export interface StacZarrResolution {
+  assetKey: string;
+  resolution: string;
+  group: string;
+}
+
+export function getStacZarrResolutions(
+  assets: Record<string, StacAsset>
+): StacZarrResolution[] {
+  const choices = Object.entries(assets).flatMap(([assetKey, asset]) => {
+    if (assetKey === "data") return [];
+    const resolution = getStringProperty(asset, "dclimate:spatial_resolution");
+    const group = getStringProperty(asset, "dclimate:zarr_group");
+    return resolution && group ? [{ assetKey, resolution, group }] : [];
+  });
+  return choices.filter(
+    (choice, index) =>
+      choices.findIndex(
+        (candidate) =>
+          candidate.resolution === choice.resolution &&
+          candidate.group === choice.group
+      ) === index
   );
 }
 
@@ -723,13 +738,22 @@ export function resolveDatasetFromStac(
     }
   }
 
-  if (!selectedItem?.assets?.data) {
-    throw new StacResolutionError(
-      `No data asset found for item "${selectedItem?.id ?? "unknown"}"`
-    );
+  if (!selectedItem) {
+    throw new StacResolutionError("No STAC item was selected for this dataset");
   }
 
-  const href = selectedItem.assets.data.href;
+  const zarrResolutions = getStacZarrResolutions(selectedItem.assets);
+  const selectedAsset =
+    selectedItem.assets.data ??
+    (zarrResolutions[0]
+      ? selectedItem.assets[zarrResolutions[0].assetKey]
+      : undefined);
+  if (!selectedAsset) {
+    throw new StacResolutionError(
+      `No readable data asset found for item "${selectedItem.id}"`
+    );
+  }
+  const href = selectedAsset.href;
   const cid = href.replace(/^ipfs:\/\//, "");
 
   return {
@@ -738,7 +762,7 @@ export function resolveDatasetFromStac(
     organizationId,
     dataset,
     variant: resolvedVariant || "default",
-    zarrGroup: getStacZarrGroup(selectedItem.assets.data, selectedItem.properties),
+    zarrResolutions,
     ...getStacReleaseMetadata(selectedItem.properties),
   };
 }
@@ -817,7 +841,10 @@ export function getConcatenableItemsFromStac(
       "time";
 
     // Extract CID from assets
-    const dataAsset = item.assets.data;
+    const zarrResolutions = getStacZarrResolutions(item.assets);
+    const dataAsset =
+      item.assets.data ??
+      (zarrResolutions[0] ? item.assets[zarrResolutions[0].assetKey] : undefined);
     if (!dataAsset) continue;
 
     const cid = dataAsset.href.replace(/^ipfs:\/\//, "");
@@ -827,7 +854,7 @@ export function getConcatenableItemsFromStac(
       cid,
       concatPriority: priority,
       concatDimension: dimension,
-      zarrGroup: getStacZarrGroup(dataAsset, item.properties),
+      zarrResolutions,
     });
   }
 

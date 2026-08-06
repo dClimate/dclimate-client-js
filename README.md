@@ -110,6 +110,40 @@ The low-level `listVersionsFromUrl`, `getExactVersionFromUrl`, and
 have the complete URLs. Items backed by hard-coded CIDs may not advertise a
 version-history service.
 
+### Multiresolution datasets
+
+Pyramidal datasets require an explicit resolution (recommended) or raw Zarr
+group. The client reports the available resolutions instead of silently
+choosing between different precision, chunking, and fetching strategies.
+
+```typescript
+const [data, metadata] = await client.loadDataset({
+  request: {
+    collection: "copernicus_clms",
+    dataset: "fpar",
+    resolution: "2km",
+  },
+});
+
+console.log(metadata.resolution, metadata.zarrGroup);
+```
+
+FPAR advertises `500m` → group `"0"`, `2km` → group `"1"`, and `8km` →
+group `"2"`. Change `request.resolution` to select any of those levels. A raw
+`options.zarrGroup` is supported for storage-aware callers, but must not be
+combined with `request.resolution`.
+
+During migration, STAC may also contain a legacy `assets.data` alias for the
+500 m asset. The client ignores it when building the three choices, and it is
+neither a fourth resolution nor a default. Consumers relying on `assets.data`
+or implicit group `"0"` should migrate before the alias is removed in a future
+breaking release.
+
+Direct CID requests have no STAC resolution mapping and must use
+`options.zarrGroup` when the store contains multiple groups; a human-readable
+resolution is rejected. STAC's internal `metadataGroup` controls only catalog
+metadata extraction and never selects a client resolution.
+
 ### Siren REST API usage
 
 Use Siren methods by configuring `siren` in the client options.

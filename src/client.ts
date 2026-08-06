@@ -13,6 +13,9 @@ import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
 import {
   DatasetNotFoundError,
+  ConflictingResolutionSelectionError,
+  MultiresolutionSelectionRequiredError,
+  ResolutionNotAvailableError,
   SirenNotConfiguredError,
   VersionHistoryUnavailableError,
 } from "./errors.js";
@@ -27,6 +30,7 @@ import {
   type StacCatalog,
   type ConcatenableStacItem,
   type ResolvedDatasetFromStac,
+  type StacZarrResolution,
 } from "./stac/index.js";
 import { DatasetCatalog } from "./stac/stac-catalog.js";
 import {
@@ -47,6 +51,54 @@ import type {
 function normalizeZarrGroup(group?: string): string | undefined {
   const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
   return normalized || undefined;
+}
+
+function resolveZarrSelection(
+  choices: StacZarrResolution[],
+  resolution?: string,
+  zarrGroup?: string
+): { zarrGroup?: string; resolution?: string } {
+  if (resolution && zarrGroup) {
+    throw new ConflictingResolutionSelectionError(
+      "Pass either request.resolution or options.zarrGroup, not both."
+    );
+  }
+  if (resolution) {
+    const match = choices.find((choice) => choice.resolution === resolution);
+    if (!match) {
+      const available = choices.map((choice) => choice.resolution);
+      throw new ResolutionNotAvailableError(
+        `Resolution '${resolution}' is not available.` +
+          (available.length ? ` Choose one of: ${available.join(", ")}.` : "")
+      );
+    }
+    return { zarrGroup: match.group, resolution: match.resolution };
+  }
+  if (zarrGroup) {
+    const normalized = normalizeZarrGroup(zarrGroup);
+    const match = choices.find((choice) => choice.group === normalized);
+    if (choices.length && !match) {
+      throw new ResolutionNotAvailableError(
+        `Zarr group '${normalized}' is not available. Choose one of: ${choices
+          .map((choice) => choice.group)
+          .join(", ")}.`
+      );
+    }
+    return { zarrGroup: normalized, resolution: match?.resolution };
+  }
+  if (choices.length > 1) {
+    throw new MultiresolutionSelectionRequiredError(
+      `This dataset has multiple resolutions; pass request.resolution or options.zarrGroup. Available resolutions: ${choices
+        .map((choice) => choice.resolution)
+        .join(", ")}.`,
+      choices.map((choice) => choice.resolution),
+      choices.map((choice) => choice.group)
+    );
+  }
+  if (choices.length === 1) {
+    return { zarrGroup: choices[0].group, resolution: choices[0].resolution };
+  }
+  return {};
 }
 
 export class DClimateClient {
@@ -224,6 +276,16 @@ export class DClimateClient {
 
 
     if (request.cid) {
+      if (request.resolution && explicitZarrGroup) {
+        throw new ConflictingResolutionSelectionError(
+          "Pass either request.resolution or options.zarrGroup, not both."
+        );
+      }
+      if (request.resolution) {
+        throw new ResolutionNotAvailableError(
+          "request.resolution requires STAC metadata; pass options.zarrGroup for a direct CID."
+        );
+      }
       // Direct CID provided - bypass catalog
       const dataset = await openDatasetFromCid(request.cid, {
         gatewayUrl,
@@ -330,7 +392,12 @@ export class DClimateClient {
     const metadataVariant = resolved.variant || "";
     const metadataOrganization =
       resolved.organizationId ?? resolvedOrganization;
-    const zarrGroup = explicitZarrGroup ?? normalizeZarrGroup(resolved.zarrGroup);
+    const zarrSelection = resolveZarrSelection(
+      resolved.zarrResolutions,
+      request.resolution,
+      explicitZarrGroup
+    );
+    const zarrGroup = zarrSelection.zarrGroup;
 
     // Build path from resolved names
     const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
@@ -367,6 +434,9 @@ export class DClimateClient {
         ? { retentionClass: resolved.retentionClass }
         : {}),
       ...(zarrGroup ? { zarrGroup } : {}),
+      ...(zarrSelection.resolution
+        ? { resolution: zarrSelection.resolution }
+        : {}),
     };
 
     if (!metadata.organization && metadata.collection?.includes("_")) {
@@ -419,8 +489,12 @@ export class DClimateClient {
     // Load all variants in parallel
     const variantsToLoad: VariantToLoad[] = await Promise.all(
       orderedVariants.map(async (variantConfig) => {
-        const zarrGroup =
-          explicitZarrGroup ?? normalizeZarrGroup(variantConfig.zarrGroup);
+        const zarrSelection = resolveZarrSelection(
+          variantConfig.zarrResolutions,
+          request.resolution,
+          explicitZarrGroup
+        );
+        const zarrGroup = zarrSelection.zarrGroup;
         // Load the dataset using the CID from STAC
         const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
@@ -452,6 +526,7 @@ export class DClimateClient {
       source: "stac_concatenated",
       fetchedAt: new Date(),
       ...(explicitZarrGroup ? { zarrGroup: explicitZarrGroup } : {}),
+      ...(request.resolution ? { resolution: request.resolution } : {}),
     };
 
     if (options.returnJaxrayDataset) {

@@ -3,6 +3,7 @@ import { DClimateClient } from "../src/client.js";
 import { VersionHistoryUnavailableError } from "../src/errors.js";
 import { VersionApiError } from "../src/errors.js";
 import {
+  getStacZarrResolutions,
   resolveDatasetFromStac,
   type StacCatalog,
 } from "../src/stac/stac-catalog.js";
@@ -22,7 +23,6 @@ const properties = {
   "dclimate:version_label": "2026-08",
   "dclimate:is_citable": true,
   "dclimate:retention_class": "permanent",
-  "dclimate:default_zarr_group": "1",
 };
 
 const item = {
@@ -33,9 +33,10 @@ const item = {
   properties,
   geometry: null,
   assets: {
-    data: {
+    "data-500m": {
       href: "ipfs://bafy-current",
-      "dclimate:zarr_group": "/0/",
+      "dclimate:zarr_group": "0",
+      "dclimate:spatial_resolution": "500m",
     },
   },
   links: [],
@@ -52,6 +53,34 @@ function response(body: unknown): Response {
 
 describe("STAC release discovery", () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it.each([true, false])(
+    "treats transitional data alias=%s as three choices",
+    (includeAlias) => {
+      const namedAssets = {
+        "data-500m": {
+          href: "ipfs://bafy-fpar",
+          "dclimate:zarr_group": "0",
+          "dclimate:spatial_resolution": "500m",
+        },
+        "data-2km": {
+          href: "ipfs://bafy-fpar",
+          "dclimate:zarr_group": "1",
+          "dclimate:spatial_resolution": "2km",
+        },
+        "data-8km": {
+          href: "ipfs://bafy-fpar",
+          "dclimate:zarr_group": "2",
+          "dclimate:spatial_resolution": "8km",
+        },
+      };
+      const assets = includeAlias
+        ? { data: { ...namedAssets["data-500m"] }, ...namedAssets }
+        : namedAssets;
+
+      expect(getStacZarrResolutions(assets)).toHaveLength(3);
+    }
+  );
 
   it("extracts release metadata from the hosted STAC server", async () => {
     vi.stubGlobal(
@@ -74,7 +103,9 @@ describe("STAC release discovery", () => {
       commitId: "commit-1",
       isCitable: true,
       retentionClass: "permanent",
-      zarrGroup: "/0/",
+      zarrResolutions: [
+        { assetKey: "data-500m", resolution: "500m", group: "0" },
+      ],
     });
   });
 
@@ -107,10 +138,12 @@ describe("STAC release discovery", () => {
     expect(resolved.versionsApi).toBe(properties["dclimate:versions_api"]);
     expect(resolved.provenanceApi).toBe(properties["dclimate:provenance_api"]);
     expect(resolved.citationApi).toBe(properties["dclimate:citation_api"]);
-    expect(resolved.zarrGroup).toBe("/0/");
+    expect(resolved.zarrResolutions).toEqual([
+      { assetKey: "data-500m", resolution: "500m", group: "0" },
+    ]);
   });
 
-  it("falls back to the item default when the data asset has no group", () => {
+  it("keeps flat data assets ungrouped", () => {
     const unannotatedAssetItem = {
       ...item,
       assets: { data: { href: "ipfs://bafy-current" } },
@@ -139,8 +172,8 @@ describe("STAC release discovery", () => {
         "wind_u_forecast",
         "operational",
         "noaa"
-      ).zarrGroup
-    ).toBe("1");
+      ).zarrResolutions
+    ).toEqual([]);
   });
 
   it("lists versions using the full URL advertised by STAC", async () => {

@@ -34,6 +34,7 @@ export interface LoadDatasetOptions {
   returnJaxrayDataset?: boolean;
   autoConcatenate?: boolean;
   zarrGroup?: string;
+  resolution?: string;
   /** Read only the requested shard entry on read-only sparse-store cache misses. */
   shardReadMode?: ShardReadMode;
 }
@@ -115,6 +116,7 @@ export interface DatasetRequest {
   variant?: string;
   organization?: string;
   cid?: string;
+  resolution?: string;
 }
 
 export interface DatasetVersionsRequest {
