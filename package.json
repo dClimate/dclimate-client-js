@@ -31,7 +31,8 @@
     "test:ci": "vitest run",
     "test:coverage": "vitest run --coverage",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "inspect:stations": "tsx scripts/inspect-stations.ts"
   },
   "keywords": [
     "dclimate",
@@ -52,7 +53,9 @@
   "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
     "@dclimate/jaxray": "^0.7.0",
-    "@opentelemetry/api": "^1.9.1"
+    "@opentelemetry/api": "^1.9.1",
+    "@dclimate/dparquet": "file:../dparquet",
+    "multiformats": "^14.0.4"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

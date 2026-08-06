@@ -40,3 +40,13 @@ export {
   type SirenRegion,
   type SirenRegionsResponse,
 } from "./siren/index.js";
+export {
+  StationsClient,
+  type LoadStationsRequest,
+  type StationsClientOptions,
+  type NearestOptions,
+  type StationDataset,
+  type StationInfo,
+  type TimeInput,
+  type TimeRangeInput,
+} from "./stations/index.js";

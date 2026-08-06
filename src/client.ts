@@ -28,6 +28,7 @@ import {
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 import { SirenClient } from "./siren/siren-client.js";
+import { StationsClient } from "./stations/stations-client.js";
 
 function normalizeZarrGroup(group?: string): string | undefined {
   const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
@@ -45,6 +46,7 @@ export class DClimateClient {
   private stacCatalogTimestamp?: number;
   private stacCacheTtl: number = 3600000; // 1 hour
   private sirenClient?: SirenClient;
+  private stationsClient?: StationsClient;
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
@@ -102,6 +104,21 @@ export class DClimateClient {
       );
     }
     return this.sirenClient;
+  }
+
+  /**
+   * Access station (point-observation) datasets:
+   *   `client.stations.load({ cid })`
+   *
+   * Unlike `client.siren`, this needs no configuration -- it reads over the
+   * client's own IPFS gateway -- so it is constructed on first use rather than
+   * requiring an option and throwing when absent.
+   */
+  get stations(): StationsClient {
+    if (!this.stationsClient) {
+      this.stationsClient = new StationsClient({ gatewayUrl: this.gatewayUrl });
+    }
+    return this.stationsClient;
   }
 
   async loadDataset({

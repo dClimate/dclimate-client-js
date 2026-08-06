@@ -73,6 +73,55 @@ const slice = await point.timeRange({
 console.log(await slice.toRecords("precipitation"));
 ```
 
+### Station data usage
+
+Gridded Zarr datasets come from `loadDataset`. Point-observation **station**
+datasets (GHCND and friends) live under `client.stations`, and read the same way:
+degrees, ISO timestamps, chained selections.
+
+```typescript
+const stations = await client.stations.load({ cid: "bafyr4i..." });
+
+// Every station, with position and coverage window.
+for (const s of stations.stations) {
+  console.log(s.stationId, s.latitude, s.longitude, s.start, s.end);
+}
+
+// Stations within 50 km of a point, over one week.
+const records = await stations
+  .circle(40.75, -73.99, 50)
+  .timeRange({ start: "2023-01-01", end: "2023-01-07" })
+  .toRecords("TMAX");
+```
+
+Selections return new instances, so a partial selection can be branched:
+
+```typescript
+const week = stations.timeRange({ start: "2023-01-01", end: "2023-01-07" });
+const nyc = await week.select("USW00094728").rows();
+const lax = await week.select("USW00023174").rows();
+```
+
+Two things differ from `GeoTemporalDataset`, because the data model differs:
+
+- **`nearest(lat, lon, { maxKm })` instead of `point()`.** A grid always has a
+  cell under any coordinate; stations are irregular, so the nearest one may be
+  far away. Pass `maxKm` to make that a hard bound rather than a surprise.
+- **`where(...)` has no gridded counterpart.** Row-level predicates are pushed
+  down to fragment statistics, so most fragments are skipped without being read:
+
+```typescript
+const hotDays = await stations
+  .nearest(29.98, -95.36)
+  .timeRange({ start: "2025-01-01", end: "2025-12-31" })
+  .where({ element: "TMAX", op: "gt", value: 3500 }) // hundredths of °C
+  .rows();
+```
+
+Reads go over the IPFS HTTP gateway, so no local daemon is required and the same
+code runs in a browser. Resolution is by CID for now; STAC catalog support will
+follow.
+
 ### Siren REST API usage
 
 Use Siren methods by configuring `siren` in the client options.
