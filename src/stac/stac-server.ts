@@ -24,7 +24,7 @@ export interface StacServerSearchResponse {
     rel: string;
     href: string;
     method?: string;
-    headers?: Record<string, string>;
+    headers?: Record<string, string | string[]>;
     body?: Record<string, unknown>;
     merge?: boolean;
   }>;
@@ -68,11 +68,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringHeaders(value: unknown): StacSearchHeaders {
   if (!isRecord(value)) return {};
-  const entries = Object.entries(value);
-  if (!entries.every(([, headerValue]) => typeof headerValue === "string")) {
-    return {};
+
+  const headers: StacSearchHeaders = {};
+  for (const [name, headerValue] of Object.entries(value)) {
+    if (typeof headerValue === "string") {
+      headers[name] = headerValue;
+    } else if (
+      Array.isArray(headerValue) &&
+      headerValue.every((entry) => typeof entry === "string")
+    ) {
+      headers[name] = headerValue.join(", ");
+    }
   }
-  return Object.fromEntries(entries) as StacSearchHeaders;
+  return headers;
 }
 
 function stableJson(value: unknown): string {

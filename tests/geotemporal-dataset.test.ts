@@ -34,7 +34,10 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
   if (!request) {
     throw new Error(`Unknown dataset key: ${key}`);
   }
-  return client.loadDataset({ request });
+  return client.loadDataset({
+    request,
+    options: key === "fpar" ? { zarrGroup: "0" } : undefined,
+  });
 }
 
   describe("loading and accessing real dataset", () => {

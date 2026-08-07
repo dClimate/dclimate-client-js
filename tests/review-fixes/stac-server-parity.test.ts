@@ -202,6 +202,48 @@ describe("STAC server parity hardening", () => {
     expect(seenHeaders[1]?.Authorization).toBeUndefined();
   });
 
+  it("normalizes array-valued continuation headers and ignores invalid entries", async () => {
+    const seenHeaders: Array<Record<string, string>> = [];
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        seenHeaders.push((init?.headers ?? {}) as Record<string, string>);
+        return response(
+          seenHeaders.length === 1
+            ? {
+                features: [feature("other_dataset", "bafy-other")],
+                links: [
+                  {
+                    rel: "next",
+                    href: "/search?page=2",
+                    headers: {
+                      "X-Cursor": ["cursor-a", "cursor-b"],
+                      "X-Trace": "trace-id",
+                      "X-Invalid": 42,
+                    },
+                  },
+                ],
+              }
+            : { features: [feature(dataset, "bafy-target")] }
+        );
+      }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(
+        collection,
+        dataset,
+        undefined,
+        "https://stac.example"
+      )
+    ).resolves.toMatchObject({ cid: "bafy-target" });
+    expect(seenHeaders[1]).toMatchObject({
+      "X-Cursor": "cursor-a, cursor-b",
+      "X-Trace": "trace-id",
+    });
+    expect(seenHeaders[1]?.["X-Invalid"]).toBeUndefined();
+  });
+
   it("disables automatic redirect following", async () => {
     const fetchMock = vi.fn(async () => response({}, 302));
     vi.stubGlobal("fetch", fetchMock);
