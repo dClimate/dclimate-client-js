@@ -155,16 +155,18 @@ function nextSearchRequest<T>(
 }
 
 function requestUrl(request: StacSearchRequest): string {
-  if (request.method !== "GET" || !request.body) return request.url;
   const url = new URL(request.url);
-  for (const [key, value] of Object.entries(request.body)) {
-    url.searchParams.delete(key);
-    if (Array.isArray(value)) {
-      for (const item of value) url.searchParams.append(key, String(item));
-    } else if (value !== undefined && value !== null) {
-      url.searchParams.set(key, String(value));
+  if (request.method === "GET" && request.body) {
+    for (const [key, value] of Object.entries(request.body)) {
+      url.searchParams.delete(key);
+      if (Array.isArray(value)) {
+        for (const item of value) url.searchParams.append(key, String(item));
+      } else if (value !== undefined && value !== null) {
+        url.searchParams.set(key, String(value));
+      }
     }
   }
+  url.hash = "";
   return url.toString();
 }
 
@@ -211,8 +213,10 @@ async function* searchPages<T>(
   for (let pageNumber = 0; pageNumber < MAX_STAC_SEARCH_PAGES; pageNumber++) {
     const pageKey = [
       request.method,
-      request.url,
-      stableJson(request.body),
+      requestUrl(request),
+      stableJson(
+        request.method === "POST" ? (request.body ?? {}) : undefined
+      ),
       stableJson(request.headers),
     ].join("\n");
     if (seen.has(pageKey)) {

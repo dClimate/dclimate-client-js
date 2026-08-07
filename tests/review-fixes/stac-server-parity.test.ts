@@ -111,6 +111,29 @@ describe("STAC server parity hardening", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("treats fragment-only pagination changes as repeated requests", async () => {
+    let fragment = 0;
+    const fetchMock = vi.fn(async () => {
+      fragment += 1;
+      return response({
+        features: [feature("other_dataset", "bafy-other")],
+        links: [{ rel: "next", href: `/search#${fragment}` }],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(
+        collection,
+        dataset,
+        undefined,
+        "https://stac.example"
+      )
+    ).rejects.toThrow(/repeated a request.*truncated/);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("https://stac.example/search");
+  });
+
   it("sends an empty object for a POST continuation without a body", async () => {
     const requestBodies: Array<BodyInit | null | undefined> = [];
     const fetchMock = vi.fn(
