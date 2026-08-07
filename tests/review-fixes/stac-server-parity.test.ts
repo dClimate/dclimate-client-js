@@ -58,6 +58,80 @@ describe("STAC server parity hardening", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("redacts credentials and query tokens from rejected pagination URLs", async () => {
+    const fetchMock = vi.fn(async () =>
+      response({
+        features: [feature("other_dataset", "bafy-other")],
+        links: [
+          {
+            rel: "next",
+            href: "https://alice:password@attacker.example/collect?token=secret#page",
+          },
+        ],
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(
+        collection,
+        dataset,
+        undefined,
+        "https://stac.example"
+      )
+    ).rejects.toThrow(
+      "STAC pagination link must use the configured server origin https://stac.example:443: https://attacker.example/collect"
+    );
+  });
+
+  it("resolves a relative server URL against the browser location", async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      seenUrls.push(url);
+      return response(
+        url.endsWith("?page=2")
+          ? { features: [feature(dataset, "bafy-target")] }
+          : {
+              features: [feature("other_dataset", "bafy-other")],
+              links: [{ rel: "next", href: "?page=2" }],
+            }
+      );
+    });
+    vi.stubGlobal("location", { href: "https://app.example/dashboard" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(collection, dataset, undefined, "/stac")
+    ).resolves.toMatchObject({ cid: "bafy-target" });
+    expect(seenUrls).toEqual([
+      "https://app.example/stac/search",
+      "https://app.example/stac/search?page=2",
+    ]);
+  });
+
+  it("uses a relative server URL for both catalog endpoints", async () => {
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      seenUrls.push(url);
+      return url.endsWith("/collections")
+        ? response({ collections: [{ id: collection }] })
+        : response({ features: [feature(dataset, "bafy-target")] });
+    });
+    vi.stubGlobal("location", { href: "https://app.example/dashboard" });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listAvailableDatasetsFromStacServer("/stac");
+
+    expect(seenUrls).toEqual(
+      expect.arrayContaining([
+        "https://app.example/stac/search",
+        "https://app.example/stac/collections",
+      ])
+    );
+  });
+
   it("rejects unsupported pagination methods", async () => {
     const fetchMock = vi.fn(async () =>
       response({

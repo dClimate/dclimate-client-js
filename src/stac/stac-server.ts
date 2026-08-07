@@ -97,6 +97,16 @@ function stableJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function resolveServerUrl(serverUrl: string): string {
+  const locationHref =
+    typeof globalThis.location === "undefined"
+      ? undefined
+      : globalThis.location.href;
+  return locationHref
+    ? new URL(serverUrl, locationHref).toString()
+    : new URL(serverUrl).toString();
+}
+
 function normalizedOrigin(url: string): string {
   const parsed = new URL(url);
   const protocol = parsed.protocol.toLowerCase();
@@ -104,6 +114,15 @@ function normalizedOrigin(url: string): string {
   const port =
     parsed.port || (protocol === "http:" ? "80" : protocol === "https:" ? "443" : "");
   return `${protocol}//${hostname}:${port}`;
+}
+
+function sanitizedUrl(url: URL): string {
+  const sanitized = new URL(url);
+  sanitized.username = "";
+  sanitized.password = "";
+  sanitized.search = "";
+  sanitized.hash = "";
+  return sanitized.toString();
 }
 
 function nextSearchRequest<T>(
@@ -129,7 +148,7 @@ function nextSearchRequest<T>(
     parsedNextUrl.password !== ""
   ) {
     throw new Error(
-      `STAC pagination link must use the configured server origin ${normalizedOrigin(serverUrl)}: ${nextUrl}`
+      `STAC pagination link must use the configured server origin ${normalizedOrigin(serverUrl)}: ${sanitizedUrl(parsedNextUrl)}`
     );
   }
 
@@ -210,8 +229,9 @@ async function* searchPages<T>(
   serverUrl: string,
   originalBody: Record<string, unknown>
 ): AsyncGenerator<StacSearchPage<T>> {
+  const resolvedServerUrl = resolveServerUrl(serverUrl);
   let request: StacSearchRequest = {
-    url: `${serverUrl.replace(/\/+$/, "")}/search`,
+    url: `${resolvedServerUrl.replace(/\/+$/, "")}/search`,
     method: "POST",
     body: originalBody,
     headers: {},
@@ -238,7 +258,7 @@ async function* searchPages<T>(
     yield page;
 
     const nextRequest = nextSearchRequest(
-      serverUrl,
+      resolvedServerUrl,
       request.url,
       originalBody,
       page
@@ -430,17 +450,19 @@ function stripIpfsScheme(cid: string | undefined): string | undefined {
 export async function listAvailableDatasetsFromStacServer(
   serverUrl: string = DEFAULT_STAC_SERVER_URL
 ): Promise<DatasetCatalog> {
+  const resolvedServerUrl = resolveServerUrl(serverUrl);
   const searchFeaturesPromise = (async () => {
     const features: StacServerSearchFeature[] = [];
-    for await (const page of searchPages<StacServerSearchFeature>(serverUrl, {
-      limit: 100,
-    })) {
+    for await (const page of searchPages<StacServerSearchFeature>(
+      resolvedServerUrl,
+      { limit: 100 }
+    )) {
       features.push(...(page.features ?? []));
     }
     return features;
   })();
   const [collectionsResp, searchFeatures] = await Promise.all([
-    fetch(`${serverUrl.replace(/\/+$/, "")}/collections`, {
+    fetch(`${resolvedServerUrl.replace(/\/+$/, "")}/collections`, {
       redirect: "manual",
     }),
     searchFeaturesPromise,
