@@ -221,8 +221,6 @@ async function* searchPages<T>(
     const page = await fetchSearchPage<T>(request);
     yield page;
 
-    const features = Array.isArray(page.features) ? page.features : [];
-    if (features.length === 0) return;
     const nextRequest = nextSearchRequest(
       serverUrl,
       request.url,
