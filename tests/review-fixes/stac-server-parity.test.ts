@@ -84,6 +84,67 @@ describe("STAC server parity hardening", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects repeated pagination requests instead of returning partial results", async () => {
+    const fetchMock = vi.fn(async () =>
+      response({
+        features: [feature("other_dataset", "bafy-other")],
+        links: [
+          {
+            rel: "next",
+            href: "/search",
+            method: "POST",
+            merge: true,
+          },
+        ],
+      })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(
+        collection,
+        dataset,
+        undefined,
+        "https://stac.example"
+      )
+    ).rejects.toThrow(/repeated a request.*truncated/);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends an empty object for a POST continuation without a body", async () => {
+    const requestBodies: Array<BodyInit | null | undefined> = [];
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit) => {
+        requestBodies.push(init?.body);
+        return response(
+          requestBodies.length === 1
+            ? {
+                features: [feature("other_dataset", "bafy-other")],
+                links: [
+                  {
+                    rel: "next",
+                    href: "/search?page=2",
+                    method: "POST",
+                  },
+                ],
+              }
+            : { features: [feature(dataset, "bafy-target")] }
+        );
+      }
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(
+        collection,
+        dataset,
+        undefined,
+        "https://stac.example"
+      )
+    ).resolves.toMatchObject({ cid: "bafy-target" });
+    expect(requestBodies[1]).toBe("{}");
+  });
+
   it("does not forward linked headers over plaintext HTTP", async () => {
     const seenHeaders: Array<Record<string, string>> = [];
     const fetchMock = vi.fn(

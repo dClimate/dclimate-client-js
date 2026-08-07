@@ -179,7 +179,7 @@ async function fetchSearchPage<T>(
         ? { "Content-Type": "application/json", ...request.headers }
         : request.headers,
     ...(request.method === "POST"
-      ? { body: JSON.stringify(request.body ?? null) }
+      ? { body: JSON.stringify(request.body ?? {}) }
       : {}),
   });
   if (!response.ok) {
@@ -215,7 +215,11 @@ async function* searchPages<T>(
       stableJson(request.body),
       stableJson(request.headers),
     ].join("\n");
-    if (seen.has(pageKey)) return;
+    if (seen.has(pageKey)) {
+      throw new Error(
+        "STAC server pagination repeated a request; results truncated"
+      );
+    }
     seen.add(pageKey);
 
     const page = await fetchSearchPage<T>(request);
