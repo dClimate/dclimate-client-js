@@ -487,7 +487,7 @@ export class DClimateClient {
     );
 
     // Load all variants in parallel
-    const variantsToLoad: VariantToLoad[] = await Promise.all(
+    const loadedVariants = await Promise.all(
       orderedVariants.map(async (variantConfig) => {
         const zarrSelection = resolveZarrSelection(
           variantConfig.zarrResolutions,
@@ -506,12 +506,26 @@ export class DClimateClient {
         return {
           variant: variantConfig,
           dataset,
+          zarrSelection,
         };
       })
     );
+    const variantsToLoad: VariantToLoad[] = loadedVariants;
 
     // Concatenate the variants
     const concatenatedDataset = await concatenateVariants(variantsToLoad);
+    const firstSelection = loadedVariants[0].zarrSelection;
+    const commonZarrGroup = loadedVariants.every(
+      ({ zarrSelection }) => zarrSelection.zarrGroup === firstSelection.zarrGroup
+    )
+      ? firstSelection.zarrGroup
+      : undefined;
+    const commonResolution = loadedVariants.every(
+      ({ zarrSelection }) =>
+        zarrSelection.resolution === firstSelection.resolution
+    )
+      ? firstSelection.resolution
+      : undefined;
 
     // Build metadata for the concatenated dataset
     const pathParts = [request.collection, request.dataset].filter(Boolean);
@@ -525,8 +539,8 @@ export class DClimateClient {
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "stac_concatenated",
       fetchedAt: new Date(),
-      ...(explicitZarrGroup ? { zarrGroup: explicitZarrGroup } : {}),
-      ...(request.resolution ? { resolution: request.resolution } : {}),
+      ...(commonZarrGroup ? { zarrGroup: commonZarrGroup } : {}),
+      ...(commonResolution ? { resolution: commonResolution } : {}),
     };
 
     if (options.returnJaxrayDataset) {

@@ -82,6 +82,23 @@ describe("STAC release discovery", () => {
     }
   );
 
+  it("rejects selectable resolution assets with different CIDs", () => {
+    expect(() =>
+      getStacZarrResolutions({
+        "data-500m": {
+          href: "ipfs://bafy-fpar-500m",
+          "dclimate:zarr_group": "0",
+          "dclimate:spatial_resolution": "500m",
+        },
+        "data-2km": {
+          href: "ipfs://bafy-fpar-2km",
+          "dclimate:zarr_group": "1",
+          "dclimate:spatial_resolution": "2km",
+        },
+      })
+    ).toThrow("Selectable resolution assets must use the same dataset CID");
+  });
+
   it("extracts release metadata from the hosted STAC server", async () => {
     vi.stubGlobal(
       "fetch",

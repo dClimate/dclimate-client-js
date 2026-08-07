@@ -34,7 +34,6 @@ export interface LoadDatasetOptions {
   returnJaxrayDataset?: boolean;
   autoConcatenate?: boolean;
   zarrGroup?: string;
-  resolution?: string;
   /** Read only the requested shard entry on read-only sparse-store cache misses. */
   shardReadMode?: ShardReadMode;
 }
@@ -92,6 +91,7 @@ export interface DatasetMetadata {
    * Dimension used for concatenation (e.g., "time")
    */
   concatDimension?: string;
+  resolution?: string;
   zarrGroup?: string;
   path: string;
   cid: string;

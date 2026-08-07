@@ -228,7 +228,7 @@ export function getStacZarrResolutions(
     const group = getStringProperty(asset, "dclimate:zarr_group");
     return resolution && group ? [{ assetKey, resolution, group }] : [];
   });
-  return choices.filter(
+  const uniqueChoices = choices.filter(
     (choice, index) =>
       choices.findIndex(
         (candidate) =>
@@ -236,6 +236,22 @@ export function getStacZarrResolutions(
           candidate.group === choice.group
       ) === index
   );
+
+  const advertisedCids = uniqueChoices.map((choice) => ({
+    assetKey: choice.assetKey,
+    cid: assets[choice.assetKey].href
+      .replace(/^ipfs:\/\//, "")
+      .replace(/^\/+|\/+$/g, ""),
+  }));
+  const firstCid = advertisedCids[0]?.cid;
+  const mismatchedCid = advertisedCids.find(({ cid }) => cid !== firstCid);
+  if (mismatchedCid) {
+    throw new StacResolutionError(
+      `Selectable resolution assets must use the same dataset CID; asset '${mismatchedCid.assetKey}' advertises '${mismatchedCid.cid}' instead of '${firstCid}'.`
+    );
+  }
+
+  return uniqueChoices;
 }
 
 // ============================================================================
