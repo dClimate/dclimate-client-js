@@ -367,6 +367,22 @@ catalog.forEach(({ collection, datasets }) => {
 });
 ```
 
+### Resolving a CID directly
+
+Use the public STAC resolver when you need the selected CID and variant without loading the dataset. The API is natively asynchronous and uses the platform's pooled `fetch` implementation.
+
+```typescript
+import { resolveCidFromStacServer } from "@dclimate/dclimate-client-js";
+
+const resolved = await resolveCidFromStacServer(
+  "ecmwf_aifs",
+  "temperature_forecast",
+  "single"
+);
+
+console.log(resolved.cid, resolved.variant);
+```
+
 ## Configuration
 
 ### Client options
@@ -427,6 +443,12 @@ Metric attributes include the gateway URL, store type, and status. The dataset C
 - `selectDataset({ request, selection, options })` - Load and apply selections in one call
 - `listAvailableDatasets()` - Get the full dataset catalog
 - `siren` - Namespaced Siren REST API client (getter; throws `SirenNotConfiguredError` unless `siren` is configured)
+
+### STAC utilities
+
+- `resolveCidFromStacServer(collection, dataset, variant?, serverUrl?)` - Resolve a CID and selected variant without loading the dataset
+- `resolveDatasetCidFromStacServer(collection, dataset, variant?, serverUrl?)` - Resolve only the CID string
+- `listAvailableDatasetsFromStacServer(serverUrl?)` - List collections, datasets, and variants directly from the paginated STAC API
 
 ### SirenClient (via `client.siren` or standalone)
 

@@ -72,6 +72,44 @@ describe("resolveCidFromStacServer pagination", () => {
     expect(fetchMock.mock.calls[1]?.[0]?.toString()).toBe(nextPageUrl);
   });
 
+  it("continues past an empty page when a next link is present", async () => {
+    const secondPageUrl = `${serverUrl}/search?page=2`;
+    const thirdPageUrl = `${serverUrl}/search?page=3`;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = input instanceof Request ? input.url : input.toString();
+      if (url === thirdPageUrl) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ features: [feature(119)], links: [] }),
+          text: async () => "",
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          features: url === secondPageUrl ? [] : [feature(0)],
+          links: [
+            {
+              rel: "next",
+              href: url === secondPageUrl ? thirdPageUrl : secondPageUrl,
+            },
+          ],
+        }),
+        text: async () => "",
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      resolveCidFromStacServer(collection, targetDataset, undefined, serverUrl),
+    ).resolves.toMatchObject({ cid: "bafy-page-item-119" });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls[2]?.[0]?.toString()).toBe(thirdPageUrl);
+  });
+
   it("resolves a relative next link against the /search endpoint, not the server root", async () => {
     const allFeatures = Array.from({ length: 150 }, (_, index) =>
       feature(index),
@@ -112,20 +150,26 @@ describe("resolveCidFromStacServer pagination", () => {
     // Every page advertises another next link, so the walk can never terminate
     // naturally. Rather than silently truncating (and reporting the target as
     // missing), it must throw so callers can fall back to the full catalog.
-    const fetchMock = vi.fn(
-      async () =>
-        ({
+    let requestNumber = 0;
+    const fetchMock = vi.fn(async () => {
+      requestNumber += 1;
+      return {
           ok: true,
           status: 200,
           statusText: "OK",
           json: async () => ({
             type: "FeatureCollection",
             features: [feature(0)],
-            links: [{ rel: "next", href: `${serverUrl}/search?page=next` }],
+            links: [
+              {
+                rel: "next",
+                href: `${serverUrl}/search?page=${requestNumber + 1}`,
+              },
+            ],
           }),
           text: async () => "",
-        }) as Response,
-    );
+        } as Response;
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(

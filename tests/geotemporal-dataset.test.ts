@@ -40,6 +40,9 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
   if (!request) {
     throw new Error(`Unknown dataset key: ${key}`);
   }
+  // fpar is a multiscale pyramid; its resolution is selected via
+  // request.resolution ("500m" -> zarr group "0"). Passing options.zarrGroup
+  // as well is rejected by resolveZarrSelection, even when both agree.
   return client.loadDataset({ request });
 }
 
