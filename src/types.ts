@@ -1,5 +1,6 @@
 import type { IPFSELEMENTS_INTERFACE } from "@dclimate/jaxray";
 import type { SirenOptions } from "./siren/types.js";
+import type { VersionFilters } from "./versions/types.js";
 
 export type IpfsElements = IPFSELEMENTS_INTERFACE;
 
@@ -90,6 +91,7 @@ export interface DatasetMetadata {
    * Dimension used for concatenation (e.g., "time")
    */
   concatDimension?: string;
+  resolution?: string;
   zarrGroup?: string;
   path: string;
   cid: string;
@@ -98,6 +100,14 @@ export interface DatasetMetadata {
    */
   source: "stac" | "stac_concatenated" | "direct_cid";
   fetchedAt: Date;
+  versionsApi?: string;
+  provenanceApi?: string;
+  citationApi?: string;
+  streamId?: string;
+  commitId?: string;
+  versionLabel?: string;
+  isCitable?: boolean;
+  retentionClass?: string;
 }
 
 export interface DatasetRequest {
@@ -106,6 +116,23 @@ export interface DatasetRequest {
   variant?: string;
   organization?: string;
   cid?: string;
+  resolution?: string;
+}
+
+export interface DatasetVersionsRequest {
+  collection: string;
+  dataset: string;
+  variant?: string;
+  organization?: string;
+  filters?: VersionFilters;
+}
+
+export interface DatasetVersionRequest {
+  collection: string;
+  dataset: string;
+  commitId: string;
+  variant?: string;
+  organization?: string;
 }
 
 export interface DataArrayObject {

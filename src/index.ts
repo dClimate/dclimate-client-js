@@ -22,6 +22,8 @@ export {
   type StacCatalogOptions,
   type ConcatenableStacItem,
   type ResolvedDatasetFromStac,
+  type StacReleaseMetadata,
+  type StacZarrResolution,
   type StacOrganization,
   type SpatialExtent,
   type TemporalExtent,
@@ -29,6 +31,17 @@ export {
   StacLoadError,
   StacResolutionError,
 } from "./stac/index.js";
+export {
+  listVersionsFromUrl,
+  getExactVersionFromUrl,
+  getCitationFromUrl,
+  type FetchImplementation,
+  type CitationInfo,
+  type DatasetVersion,
+  type DatasetVersionListing,
+  type VerificationInfo,
+  type VersionFilters,
+} from "./versions/index.js";
 export {
   SirenClient,
   type SirenApiKeyAuth,
