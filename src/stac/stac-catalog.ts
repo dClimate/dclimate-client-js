@@ -85,6 +85,7 @@ export interface StacAsset {
   type?: string;
   title?: string;
   roles?: string[];
+  [key: string]: unknown;
 }
 
 export interface StacItem {
@@ -140,6 +141,40 @@ export function getStringProperty(
   return typeof value === "string" ? value : undefined;
 }
 
+function getBooleanProperty(
+  properties: Record<string, unknown> | undefined,
+  key: string
+): boolean | undefined {
+  const value = properties?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
+export interface StacReleaseMetadata {
+  versionsApi?: string;
+  provenanceApi?: string;
+  citationApi?: string;
+  streamId?: string;
+  commitId?: string;
+  versionLabel?: string;
+  isCitable?: boolean;
+  retentionClass?: string;
+}
+
+export function getStacReleaseMetadata(
+  properties: Record<string, unknown> | undefined
+): StacReleaseMetadata {
+  return {
+    versionsApi: getStringProperty(properties, "dclimate:versions_api"),
+    provenanceApi: getStringProperty(properties, "dclimate:provenance_api"),
+    citationApi: getStringProperty(properties, "dclimate:citation_api"),
+    streamId: getStringProperty(properties, "dclimate:stream_id"),
+    commitId: getStringProperty(properties, "dclimate:commit_id"),
+    versionLabel: getStringProperty(properties, "dclimate:version_label"),
+    isCitable: getBooleanProperty(properties, "dclimate:is_citable"),
+    retentionClass: getStringProperty(properties, "dclimate:retention_class"),
+  };
+}
+
 function getNumberProperty(
   properties: Record<string, unknown> | undefined,
   key: string
@@ -159,6 +194,7 @@ export interface ConcatenableStacItem {
   cid: string;
   concatPriority: number;
   concatDimension: string;
+  zarrResolutions: StacZarrResolution[];
 }
 
 export interface StacOrganization {
@@ -168,12 +204,54 @@ export interface StacOrganization {
   catalog: StacCatalog;
 }
 
-export interface ResolvedDatasetFromStac {
+export interface ResolvedDatasetFromStac extends StacReleaseMetadata {
   cid: string;
   collectionId: string;
   organizationId?: string;
   dataset: string;
   variant: string;
+  zarrResolutions: StacZarrResolution[];
+}
+
+export interface StacZarrResolution {
+  assetKey: string;
+  resolution: string;
+  group: string;
+}
+
+export function getStacZarrResolutions(
+  assets: Record<string, StacAsset>
+): StacZarrResolution[] {
+  const choices = Object.entries(assets).flatMap(([assetKey, asset]) => {
+    if (assetKey === "data") return [];
+    const resolution = getStringProperty(asset, "dclimate:spatial_resolution");
+    const group = getStringProperty(asset, "dclimate:zarr_group");
+    return resolution && group ? [{ assetKey, resolution, group }] : [];
+  });
+  const uniqueChoices = choices.filter(
+    (choice, index) =>
+      choices.findIndex(
+        (candidate) =>
+          candidate.resolution === choice.resolution &&
+          candidate.group === choice.group
+      ) === index
+  );
+
+  const advertisedCids = uniqueChoices.map((choice) => ({
+    assetKey: choice.assetKey,
+    cid: assets[choice.assetKey].href
+      .replace(/^ipfs:\/\//, "")
+      .replace(/^\/+|\/+$/g, ""),
+  }));
+  const firstCid = advertisedCids[0]?.cid;
+  const mismatchedCid = advertisedCids.find(({ cid }) => cid !== firstCid);
+  if (mismatchedCid) {
+    throw new StacResolutionError(
+      `Selectable resolution assets must use the same dataset CID; asset '${mismatchedCid.assetKey}' advertises '${mismatchedCid.cid}' instead of '${firstCid}'.`
+    );
+  }
+
+  return uniqueChoices;
 }
 
 // ============================================================================
@@ -676,13 +754,22 @@ export function resolveDatasetFromStac(
     }
   }
 
-  if (!selectedItem?.assets?.data) {
-    throw new StacResolutionError(
-      `No data asset found for item "${selectedItem?.id ?? "unknown"}"`
-    );
+  if (!selectedItem) {
+    throw new StacResolutionError("No STAC item was selected for this dataset");
   }
 
-  const href = selectedItem.assets.data.href;
+  const zarrResolutions = getStacZarrResolutions(selectedItem.assets);
+  const selectedAsset =
+    selectedItem.assets.data ??
+    (zarrResolutions[0]
+      ? selectedItem.assets[zarrResolutions[0].assetKey]
+      : undefined);
+  if (!selectedAsset) {
+    throw new StacResolutionError(
+      `No readable data asset found for item "${selectedItem.id}"`
+    );
+  }
+  const href = selectedAsset.href;
   const cid = href.replace(/^ipfs:\/\//, "");
 
   return {
@@ -691,6 +778,8 @@ export function resolveDatasetFromStac(
     organizationId,
     dataset,
     variant: resolvedVariant || "default",
+    zarrResolutions,
+    ...getStacReleaseMetadata(selectedItem.properties),
   };
 }
 
@@ -768,7 +857,10 @@ export function getConcatenableItemsFromStac(
       "time";
 
     // Extract CID from assets
-    const dataAsset = item.assets.data;
+    const zarrResolutions = getStacZarrResolutions(item.assets);
+    const dataAsset =
+      item.assets.data ??
+      (zarrResolutions[0] ? item.assets[zarrResolutions[0].assetKey] : undefined);
     if (!dataAsset) continue;
 
     const cid = dataAsset.href.replace(/^ipfs:\/\//, "");
@@ -778,6 +870,7 @@ export function getConcatenableItemsFromStac(
       cid,
       concatPriority: priority,
       concatDimension: dimension,
+      zarrResolutions,
     });
   }
 

@@ -114,7 +114,14 @@ describe("loadDataset auto-concatenation", () => {
           },
           geometry: null,
           links: [],
-          assets: { data: { href: "ipfs://bafy-part1-data" } },
+          assets: {
+            data: { href: "ipfs://bafy-part1-data" },
+            "data-500m": {
+              href: "ipfs://bafy-part1-data",
+              "dclimate:zarr_group": "0",
+              "dclimate:spatial_resolution": "500m",
+            },
+          },
         },
       ],
       [
@@ -129,7 +136,14 @@ describe("loadDataset auto-concatenation", () => {
           },
           geometry: null,
           links: [],
-          assets: { data: { href: "ipfs://bafy-part2-data" } },
+          assets: {
+            data: { href: "ipfs://bafy-part2-data" },
+            "data-500m": {
+              href: "ipfs://bafy-part2-data",
+              "dclimate:zarr_group": "0",
+              "dclimate:spatial_resolution": "500m",
+            },
+          },
         },
       ],
     ]);
@@ -183,5 +197,10 @@ describe("loadDataset auto-concatenation", () => {
     expect(metadata.concatenatedVariants).toEqual(["part2", "part1"]);
     expect(metadata.cid).toBe("bafy-part2-data");
     expect(metadata.concatDimension).toBe("time");
+    expect(metadata.resolution).toBe("500m");
+    expect(metadata.zarrGroup).toBe("0");
+    for (const [, openOptions] of openDatasetFromCidMock.mock.calls) {
+      expect(openOptions).toEqual(expect.objectContaining({ zarrGroup: "0" }));
+    }
   });
 });

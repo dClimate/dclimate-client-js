@@ -73,12 +73,14 @@ describe("getConcatenableItemsFromStac collection resolution", () => {
         cid: "bafy-era5-part1-data",
         concatPriority: 0,
         concatDimension: "time",
+        zarrResolutions: [],
       },
       {
         variant: "part2",
         cid: "bafy-era5-part2-data",
         concatPriority: 1,
         concatDimension: "time",
+        zarrResolutions: [],
       },
     ];
 
@@ -116,6 +118,7 @@ describe("getConcatenableItemsFromStac collection resolution", () => {
         cid: "bafy-era5-part1-data",
         concatPriority: 0,
         concatDimension: "time",
+        zarrResolutions: [],
       },
     ]);
   });

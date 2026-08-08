@@ -10,8 +10,14 @@ import type {
   CatalogDataset,
   DatasetCatalog,
   DatasetVariantConfig,
+  StacReleaseMetadata,
+  StacZarrResolution,
 } from "./stac-catalog.js";
-import { getStringProperty } from "./stac-catalog.js";
+import {
+  getStacReleaseMetadata,
+  getStacZarrResolutions,
+  getStringProperty,
+} from "./stac-catalog.js";
 
 export const DEFAULT_STAC_SERVER_URL = "https://api.stac.dclimate.net";
 
@@ -35,14 +41,18 @@ export interface StacServerItem {
   id: string;
   collection?: string;
   properties: Record<string, unknown>;
-  assets: Record<string, { href: string; type?: string; title?: string }>;
+  assets: Record<
+    string,
+    { href: string; type?: string; title?: string; [key: string]: unknown }
+  >;
 }
 
-export interface ResolvedCidFromServer {
+export interface ResolvedCidFromServer extends StacReleaseMetadata {
   cid: string;
   collectionId: string;
   dataset: string;
   variant: string;
+  zarrResolutions: StacZarrResolution[];
 }
 
 const MAX_STAC_SEARCH_PAGES = 50;
@@ -372,18 +382,33 @@ export async function resolveCidFromStacServer(
   }
 
   // Extract CID from asset
-  const href = selectedItem.assets?.data?.href || "";
-  if (!href) {
+  const zarrResolutions = getStacZarrResolutions(selectedItem.assets);
+  const dataAsset =
+    selectedItem.assets?.data ??
+    (zarrResolutions[0]
+      ? selectedItem.assets[zarrResolutions[0].assetKey]
+      : undefined);
+  const href = dataAsset?.href || "";
+  const advertisedCid = getStringProperty(
+    selectedItem.properties,
+    "dclimate:latest_dataset_cid"
+  );
+  const rawCid = href || advertisedCid || "";
+  if (!rawCid) {
     throw new Error(`Item '${selectedItem.id}' has no data asset`);
   }
 
-  const cid = href.startsWith("ipfs://") ? href.replace("ipfs://", "") : href;
+  const cid = rawCid.startsWith("ipfs://")
+    ? rawCid.replace("ipfs://", "")
+    : rawCid;
 
   return {
     cid,
     collectionId: collection,
     dataset,
     variant: resolvedVariant,
+    zarrResolutions,
+    ...getStacReleaseMetadata(selectedItem.properties),
   };
 }
 

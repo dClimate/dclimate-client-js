@@ -6,7 +6,13 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 const client = new DClimateClient();
 
 const DATASET_REQUESTS: Record<string, DatasetRequest> = {
-  fpar: { collection: "copernicus_clms", organization: "copernicus", dataset: "fpar", variant: "default" },
+  fpar: {
+    collection: "copernicus_clms",
+    organization: "copernicus",
+    dataset: "fpar",
+    variant: "default",
+    resolution: "500m",
+  },
   "ifs-temperature": { collection: "ifs", organization: "ecmwf", dataset: "temperature_forecast", variant: "default" },
   "ifs-precip": { collection: "ifs", organization: "ecmwf", dataset: "precipitation_forecast", variant: "default" },
   "aifs-single-temperature": {
