@@ -42,9 +42,12 @@ export {
 } from "./siren/index.js";
 export {
   StationsClient,
+  translateStationError,
   type LoadStationsRequest,
+  type NearestStationRequest,
   type StationsClientOptions,
   type NearestOptions,
+  type NearestStation,
   type StationDataset,
   type StationInfo,
   type TimeInput,

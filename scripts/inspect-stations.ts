@@ -14,7 +14,8 @@
  * Options:
  *   --gateway <url>     IPFS HTTP gateway (default http://127.0.0.1:8080)
  *   --station <id>      Restrict to one station id (repeatable)
- *   --near <lat,lon>    Use the single nearest station to a point instead
+ *   --near <lat,lon>    Use the nearest station that reports every --element
+ *   --max-km <n>        Fail if the nearest such station is further than this
  *   --element <name>    Restrict to one element, e.g. TMAX, TMIN, PRCP (repeatable)
  *   --from <date>       ISO date, inclusive
  *   --to <date>         ISO date, inclusive
@@ -42,6 +43,7 @@ interface Args {
   limit: number;
   plan: boolean;
   list: boolean;
+  maxKm: number | null;
 }
 
 const USAGE = `Usage:
@@ -50,7 +52,8 @@ const USAGE = `Usage:
 Options:
   --gateway <url>     IPFS HTTP gateway (default ${DEFAULT_GATEWAY})
   --station <id>      Restrict to one station id (repeatable)
-  --near <lat,lon>    Use the single nearest station to a point
+  --near <lat,lon>    Use the nearest station that reports every --element
+  --max-km <n>        Fail if the nearest such station is further than this
   --element <name>    Restrict to one element, e.g. TMAX (repeatable)
   --from <date>       ISO date, inclusive
   --to <date>         ISO date, inclusive
@@ -70,6 +73,7 @@ function parseArgs(argv: string[]): Args {
     limit: 10,
     plan: false,
     list: false,
+    maxKm: null,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -94,6 +98,7 @@ function parseArgs(argv: string[]): Args {
       case "--limit": args.limit = Number(value()); break;
       case "--plan": args.plan = true; break;
       case "--list": args.list = true; break;
+      case "--max-km": args.maxKm = Number(value()); break;
       case "--near": {
         const parts = value().split(",");
         const lat = Number(parts[0]);
@@ -114,6 +119,12 @@ function parseArgs(argv: string[]): Args {
   if (!args.cid) throw new Error("A root CID is required");
   if (!Number.isFinite(args.limit) || args.limit < 0) {
     throw new Error("--limit must be a non-negative number");
+  }
+  if (args.maxKm !== null && (!Number.isFinite(args.maxKm) || args.maxKm <= 0)) {
+    throw new Error("--max-km must be a positive number");
+  }
+  if (args.maxKm !== null && !args.near) {
+    throw new Error("--max-km only applies with --near");
   }
   return args;
 }
@@ -136,10 +147,27 @@ async function applySelection(
 
   if (args.near) {
     const [lat, lon] = args.near;
-    // `nearest` is the one async selection: it resolves an actual station from
-    // the geo projection rather than just recording an intent.
-    selected = await selected.nearest(lat, lon);
-    console.log(`\nNearest station to ${lat}, ${lon}: ${selected.toQuery().stations?.[0]}`);
+    // Resolved rather than just recorded, so this is the one async selection --
+    // and the only place the distance is available to print. A station 3,000 km
+    // away is a usable answer or a useless one depending entirely on that number,
+    // and printing the id alone hides the difference.
+    const found = await selected.findNearestStation(lat, lon, {
+      // Asking for an element means asking for a station that reports it. The
+      // nearest station that has never recorded TMAX is not a TMAX answer.
+      ...(args.elements.length > 0 ? { requireColumns: args.elements } : {}),
+      ...(args.maxKm === null ? {} : { maxKm: args.maxKm }),
+    });
+    selected = selected.select(found.stationId);
+    const columns = await dataset.columnsFor(found.stationId);
+    console.log(
+      `\nNearest station to ${lat}, ${lon}: ${found.stationId} (${found.km.toFixed(1)} km)`
+    );
+    console.log(`  reports: ${columns.join(", ")}`);
+    if (found.km > 500) {
+      console.log(
+        `  NOTE: ${found.km.toFixed(0)} km away -- this dataset may not cover that region.`
+      );
+    }
   } else if (args.stations.length > 0) {
     selected = selected.select(...args.stations);
   }
