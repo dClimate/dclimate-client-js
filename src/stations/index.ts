@@ -9,4 +9,4 @@ export type {
   StationInfo,
   TimeInput,
   TimeRangeInput,
-} from "@dclimate/dparquet/reader";
+} from "@dclimate/tabular/reader";

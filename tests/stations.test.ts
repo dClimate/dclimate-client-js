@@ -4,7 +4,7 @@ import { StationsClient } from "../src/stations/stations-client.js";
 import { DatasetNotFoundError } from "../src/errors.js";
 
 const REAL_CID =
-  "bafyr4igxoe2toq5t3afp4embl3p2v4rgdfndymlhjiuizca3zwlvrmhcam";
+  "bafyr4ieoihgvnl5rvu6eh2fqduapjtz7wjp3e7kdtfxjospmavi5lgkoq4";
 
 describe("client.stations", () => {
   it("is available without configuration, unlike siren", () => {

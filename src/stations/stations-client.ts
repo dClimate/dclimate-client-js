@@ -2,7 +2,7 @@ import { CID } from "multiformats/cid";
 import {
   GatewayRangeSource,
   StationDataset,
-} from "@dclimate/dparquet/reader";
+} from "@dclimate/tabular/reader";
 import { DatasetNotFoundError } from "../errors.js";
 
 /**

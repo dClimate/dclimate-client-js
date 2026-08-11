@@ -19,6 +19,7 @@
  *   --from <date>       ISO date, inclusive
  *   --to <date>         ISO date, inclusive
  *   --limit <n>         Rows to print (default 10; 0 prints all)
+ *   --list              List every station first (walks the whole index)
  *   --plan              Show what would be fetched, then stop
  *
  * Requires an IPFS gateway that can serve the dataset's blocks. A local Kubo
@@ -26,7 +27,7 @@
  */
 
 import { DClimateClient } from "../src/index.js";
-import type { StationDataset, StationInfo } from "@dclimate/dparquet/reader";
+import type { StationDataset, StationInfo } from "@dclimate/tabular/reader";
 
 const DEFAULT_GATEWAY = "http://127.0.0.1:8080";
 
@@ -40,6 +41,7 @@ interface Args {
   to: string | null;
   limit: number;
   plan: boolean;
+  list: boolean;
 }
 
 const USAGE = `Usage:
@@ -53,6 +55,7 @@ Options:
   --from <date>       ISO date, inclusive
   --to <date>         ISO date, inclusive
   --limit <n>         Rows to print (default 10; 0 prints all)
+  --list              List every station first (walks the whole index)
   --plan              Show what would be fetched, then stop`;
 
 function parseArgs(argv: string[]): Args {
@@ -66,6 +69,7 @@ function parseArgs(argv: string[]): Args {
     to: null,
     limit: 10,
     plan: false,
+    list: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -89,6 +93,7 @@ function parseArgs(argv: string[]): Args {
       case "--to": args.to = value(); break;
       case "--limit": args.limit = Number(value()); break;
       case "--plan": args.plan = true; break;
+      case "--list": args.list = true; break;
       case "--near": {
         const parts = value().split(",");
         const lat = Number(parts[0]);
@@ -123,12 +128,17 @@ function describeStation(station: StationInfo): string {
   return `${station.stationId}  ${where}  ${day(station.start)} .. ${day(station.end)}`;
 }
 
-function applySelection(dataset: StationDataset, args: Args): StationDataset {
+async function applySelection(
+  dataset: StationDataset,
+  args: Args
+): Promise<StationDataset> {
   let selected = dataset;
 
   if (args.near) {
     const [lat, lon] = args.near;
-    selected = selected.nearest(lat, lon);
+    // `nearest` is the one async selection: it resolves an actual station from
+    // the geo projection rather than just recording an intent.
+    selected = await selected.nearest(lat, lon);
     console.log(`\nNearest station to ${lat}, ${lon}: ${selected.toQuery().stations?.[0]}`);
   } else if (args.stations.length > 0) {
     selected = selected.select(...args.stations);
@@ -139,7 +149,8 @@ function applySelection(dataset: StationDataset, args: Args): StationDataset {
   if (args.from || args.to) {
     // Either bound alone is meaningful, so the missing side widens to the
     // dataset's own extent rather than forcing the caller to pass both.
-    const covered = dataset.stations;
+    // Widening costs a full index walk, so only the open-ended side pays for it.
+    const covered = await dataset.listStations();
     const earliest = Math.min(...covered.map((s) => s.start.getTime()));
     const latest = Math.max(...covered.map((s) => s.end.getTime()));
     selected = selected.timeRange({
@@ -166,10 +177,15 @@ async function main(): Promise<void> {
 
   const dataset = await client.stations.load({ cid: args.cid });
 
-  console.log(`Stations (${dataset.stations.length}):`);
-  for (const station of dataset.stations) console.log(`  ${describeStation(station)}`);
+  // Opt-in, because listing walks the whole station index -- a block per station,
+  // ~136k reads on GHCND -- and every other path here needs at most a few of them.
+  if (args.list) {
+    const stations = await dataset.listStations();
+    console.log(`Stations (${stations.length}):`);
+    for (const station of stations) console.log(`  ${describeStation(station)}`);
+  }
 
-  const selected = applySelection(dataset, args);
+  const selected = await applySelection(dataset, args);
   console.log(`\nQuery (wire units): ${JSON.stringify(selected.toQuery())}`);
 
   const plan = await selected.plan();

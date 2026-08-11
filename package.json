@@ -54,7 +54,7 @@
   "dependencies": {
     "@dclimate/jaxray": "^0.7.0",
     "@opentelemetry/api": "^1.9.1",
-    "@dclimate/dparquet": "file:../dparquet",
+    "@dclimate/tabular": "file:../dparquet",
     "multiformats": "^14.0.4"
   },
   "devDependencies": {

@@ -2,21 +2,6 @@
 # yarn lockfile v1
 
 
-"@dclimate/dparquet@file:../dparquet":
-  version "0.0.0"
-  resolved "file:../dparquet"
-  dependencies:
-    "@dclimate/ipld-index" "file:../ipld-index"
-    "@helia/unixfs" "8.0.3"
-    "@ipld/dag-cbor" "^10.0.1"
-    "@noble/hashes" "^2.0.1"
-    helia "7.0.5"
-    hyparquet "^1.26.2"
-    hyparquet-compressors "^1.1.1"
-    hyparquet-writer "^0.16.1"
-    multiformats "^14.0.4"
-    zod "^4.1.0"
-
 "@dclimate/jaxray@^0.7.0":
   version "0.7.0"
   resolved "https://registry.npmjs.org/@dclimate/jaxray/-/jaxray-0.7.0.tgz"
@@ -30,6 +15,21 @@
     multiformats "^13.3.1"
     uint8arrays "^5.1.0"
     zarrita "^0.5.4"
+
+"@dclimate/tabular@file:../dparquet":
+  version "0.0.0"
+  resolved "file:../dparquet"
+  dependencies:
+    "@dclimate/ipld-index" "^0.1.0"
+    "@helia/unixfs" "8.0.3"
+    "@ipld/dag-cbor" "^10.0.1"
+    "@noble/hashes" "^2.0.1"
+    helia "7.0.5"
+    hyparquet "^1.26.2"
+    hyparquet-compressors "^1.1.1"
+    hyparquet-writer "^0.16.1"
+    multiformats "^14.0.4"
+    zod "^4.1.0"
 
 "@eslint-community/eslint-utils@^4.8.0", "@eslint-community/eslint-utils@^4.9.1":
   version "4.9.1"
