@@ -90,7 +90,15 @@ export class StationsClient {
       gatewayUrl: request.gatewayUrl ?? this.options.gatewayUrl,
       ...(this.options.fetch ? { fetch: this.options.fetch } : {}),
     });
-    return StationDataset.open(source, root);
+    // Opening reads and parses the dataset's manifest, so a well-formed CID that
+    // points at something else fails here rather than at query time. Translated
+    // like any other reader failure: a caller catching `DClimateClientError`
+    // should not have to also know `@dclimate/tabular`'s error hierarchy.
+    try {
+      return await StationDataset.open(source, root);
+    } catch (cause) {
+      return translateStationError(cause);
+    }
   }
 
   /**

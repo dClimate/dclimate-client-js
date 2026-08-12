@@ -187,14 +187,30 @@ async function applySelection(
   if (args.from || args.to) {
     // Either bound alone is meaningful, so the missing side widens to the
     // dataset's own extent rather than forcing the caller to pass both.
-    // Widening costs a full index walk, so only the open-ended side pays for it.
-    const covered = await dataset.listStations();
-    const earliest = Math.min(...covered.map((s) => s.start.getTime()));
-    const latest = Math.max(...covered.map((s) => s.end.getTime()));
-    selected = selected.timeRange({
-      start: args.from ?? new Date(earliest),
-      end: args.to ?? new Date(latest),
-    });
+    // Widening costs a full index walk -- a block per station, ~136k reads on
+    // GHCND -- so only an actually-missing bound pays for it, and a query that
+    // supplies both never walks at all.
+    let start: Date | string = args.from ?? "";
+    let end: Date | string = args.to ?? "";
+    if (!args.from || !args.to) {
+      const covered = await dataset.listStations();
+      // Folded rather than spread into Math.min/Math.max: at GHCND's station
+      // count the spread exceeds V8's argument limit and throws.
+      let earliest = Infinity;
+      let latest = -Infinity;
+      for (const station of covered) {
+        earliest = Math.min(earliest, station.start.getTime());
+        latest = Math.max(latest, station.end.getTime());
+      }
+      if (!Number.isFinite(earliest) || !Number.isFinite(latest)) {
+        throw new Error(
+          "Dataset reports no stations, so an open-ended --from/--to cannot be widened."
+        );
+      }
+      if (!args.from) start = new Date(earliest);
+      if (!args.to) end = new Date(latest);
+    }
+    selected = selected.timeRange({ start, end });
   }
 
   return selected;
