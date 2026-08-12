@@ -47,6 +47,19 @@ export interface NearestStationRequest extends LoadStationsRequest {
   columns?: readonly string[];
   /** Reject the match when the closest qualifying station is further than this. */
   maxKm?: number;
+  /**
+   * Narrow `columns` to a time range, so a station qualifies only if it reported
+   * them *then*.
+   *
+   * Without it, presence means "has ever reported": a station whose TMAX ended in
+   * 1987 satisfies a 2024 query and then yields nothing but nulls. Real datasets
+   * do this -- GHCND's ACW00011647 lists TMAX on the strength of readings that
+   * only start in 2025.
+   *
+   * Resolution is per fragment (whole years, for GHCND), so a range landing
+   * anywhere in a year that has the column matches it.
+   */
+  within?: { start: Date | string | number; end: Date | string | number };
 }
 
 export class StationsClient {
@@ -98,6 +111,7 @@ export class StationsClient {
       return await dataset.findNearestStation(request.latitude, request.longitude, {
         ...(request.columns ? { requireColumns: request.columns } : {}),
         ...(request.maxKm === undefined ? {} : { maxKm: request.maxKm }),
+        ...(request.within === undefined ? {} : { withinRange: request.within }),
       });
     } catch (cause) {
       return translateStationError(cause);

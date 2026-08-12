@@ -151,18 +151,28 @@ async function applySelection(
     // and the only place the distance is available to print. A station 3,000 km
     // away is a usable answer or a useless one depending entirely on that number,
     // and printing the id alone hides the difference.
+    // Asking for an element over a date range means asking for a station that
+    // reported it *then*. Without this, a station whose TMAX stopped in 1987
+    // satisfies a 2024 query and answers it entirely in nulls.
+    const within =
+      args.elements.length > 0 && (args.from || args.to)
+        ? { start: args.from ?? "0001-01-01", end: args.to ?? "9999-12-31" }
+        : null;
     const found = await selected.findNearestStation(lat, lon, {
       // Asking for an element means asking for a station that reports it. The
       // nearest station that has never recorded TMAX is not a TMAX answer.
       ...(args.elements.length > 0 ? { requireColumns: args.elements } : {}),
       ...(args.maxKm === null ? {} : { maxKm: args.maxKm }),
+      ...(within === null ? {} : { withinRange: within }),
     });
     selected = selected.select(found.stationId);
     const columns = await dataset.columnsFor(found.stationId);
     console.log(
       `\nNearest station to ${lat}, ${lon}: ${found.stationId} (${found.km.toFixed(1)} km)`
     );
-    console.log(`  reports: ${columns.join(", ")}`);
+    console.log(
+      `  reports: ${columns.join(", ")}${within === null ? "" : "  (ever)"}`
+    );
     if (found.km > 500) {
       console.log(
         `  NOTE: ${found.km.toFixed(0)} km away -- this dataset may not cover that region.`

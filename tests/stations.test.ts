@@ -159,4 +159,70 @@ describe("client.stations.nearest", () => {
     ).rejects.toThrow(DatasetNotFoundError);
     expect(fetched).toBe(0);
   });
+
+  /**
+   * A client whose `load` returns a stub dataset, so the options reaching the
+   * library are observable without a real dataset behind them.
+   *
+   * The library owns which station wins; the only thing that can break at this
+   * boundary is an option not arriving -- and that failure is silent, returning a
+   * perfectly plausible station that simply has no data in the range asked for.
+   */
+  class RecordingStations extends StationsClient {
+    seen: Record<string, unknown> | undefined;
+
+    override load(): Promise<never> {
+      return Promise.resolve({
+        findNearestStation: (
+          _lat: number,
+          _lon: number,
+          options: Record<string, unknown>
+        ) => {
+          this.seen = options;
+          return Promise.resolve({
+            stationId: "X",
+            km: 1,
+            latitude: 0,
+            longitude: 0,
+          });
+        },
+      } as unknown as never);
+    }
+  }
+
+  it("passes `within` through as the library's withinRange", async () => {
+    const stations = new RecordingStations({
+      gatewayUrl: "http://127.0.0.1:8080",
+    });
+
+    await stations.nearest({
+      cid: "irrelevant",
+      latitude: 43.4,
+      longitude: -79.8,
+      columns: ["TMAX"],
+      within: { start: "2024-01-01", end: "2024-12-31" },
+    });
+
+    expect(stations.seen).toEqual({
+      requireColumns: ["TMAX"],
+      withinRange: { start: "2024-01-01", end: "2024-12-31" },
+    });
+  });
+
+  it("omits withinRange entirely when `within` is not given", async () => {
+    // Absent must mean absent: forwarding `undefined` would trip the library's
+    // "withinRange without requireColumns" guard for callers who never asked.
+    const stations = new RecordingStations({
+      gatewayUrl: "http://127.0.0.1:8080",
+    });
+
+    await stations.nearest({
+      cid: "irrelevant",
+      latitude: 43.4,
+      longitude: -79.8,
+      columns: ["TMAX"],
+    });
+
+    expect(stations.seen).not.toHaveProperty("withinRange");
+  });
 });
