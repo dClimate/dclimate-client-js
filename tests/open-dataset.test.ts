@@ -24,7 +24,7 @@ describe("openDatasetFromCid", () => {
 
   it("opens an IPFS store and Zarr dataset with default gateway telemetry enabled", async () => {
     const store = { kind: "store" };
-    const dataset = { kind: "dataset" };
+    const dataset = { kind: "dataset", attrs: {} };
     openIpfsStoreMock.mockResolvedValue({ store });
     openZarrMock.mockResolvedValue(dataset);
 
@@ -39,13 +39,34 @@ describe("openDatasetFromCid", () => {
 
   it("passes an explicit Zarr group to jaxray", async () => {
     const store = { kind: "store" };
-    const dataset = { kind: "dataset" };
+    const dataset = { kind: "dataset", attrs: {} };
     openIpfsStoreMock.mockResolvedValue({ store });
     openZarrMock.mockResolvedValue(dataset);
 
     await expect(openDatasetFromCid("bafygrouped", { zarrGroup: "/0/" })).resolves.toBe(dataset);
 
     expect(openZarrMock).toHaveBeenCalledWith(store, { group: "0" });
+    expect(dataset.attrs).toEqual({ _ipfs_zarr_group: "0" });
+  });
+
+  it("requires an explicit group when jaxray reports an ambiguous grouped root", async () => {
+    const store = { kind: "grouped-store" };
+    const dataset = { kind: "dataset", attrs: {} as Record<string, unknown> };
+    openIpfsStoreMock.mockResolvedValue({ store });
+    openZarrMock
+      .mockRejectedValueOnce(
+        new Error(
+          "ZarrBackend.open: grouped Zarr stores with multiple top-level groups require an explicit group option."
+        )
+      )
+      .mockResolvedValueOnce(dataset);
+
+    await expect(openDatasetFromCid("bafygrouped")).rejects.toThrow(
+      "pass zarrGroup explicitly"
+    );
+
+    expect(openZarrMock).toHaveBeenNthCalledWith(1, store);
+    expect(openZarrMock).toHaveBeenCalledTimes(1);
   });
 
   it("uses caller supplied IPFS elements", async () => {

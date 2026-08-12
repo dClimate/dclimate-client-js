@@ -6,7 +6,13 @@ describe("GeoTemporalDataset - Real Data Integration Tests", () => {
 const client = new DClimateClient();
 
 const DATASET_REQUESTS: Record<string, DatasetRequest> = {
-  fpar: { collection: "copernicus_clms", organization: "copernicus", dataset: "fpar", variant: "default" },
+  fpar: {
+    collection: "copernicus_clms",
+    organization: "copernicus",
+    dataset: "fpar",
+    variant: "default",
+    resolution: "500m",
+  },
   "ifs-temperature": { collection: "ifs", organization: "ecmwf", dataset: "temperature_forecast", variant: "default" },
   "ifs-precip": { collection: "ifs", organization: "ecmwf", dataset: "precipitation_forecast", variant: "default" },
   "aifs-single-temperature": {
@@ -34,6 +40,9 @@ function loadDataset(key: keyof typeof DATASET_REQUESTS) {
   if (!request) {
     throw new Error(`Unknown dataset key: ${key}`);
   }
+  // fpar is a multiscale pyramid; its resolution is selected via
+  // request.resolution ("500m" -> zarr group "0"). Passing options.zarrGroup
+  // as well is rejected by resolveZarrSelection, even when both agree.
   return client.loadDataset({ request });
 }
 

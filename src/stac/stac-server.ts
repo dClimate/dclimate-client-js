@@ -10,8 +10,14 @@ import type {
   CatalogDataset,
   DatasetCatalog,
   DatasetVariantConfig,
+  StacReleaseMetadata,
+  StacZarrResolution,
 } from "./stac-catalog.js";
-import { getStringProperty } from "./stac-catalog.js";
+import {
+  getStacReleaseMetadata,
+  getStacZarrResolutions,
+  getStringProperty,
+} from "./stac-catalog.js";
 
 export const DEFAULT_STAC_SERVER_URL = "https://api.stac.dclimate.net";
 
@@ -24,7 +30,7 @@ export interface StacServerSearchResponse {
     rel: string;
     href: string;
     method?: string;
-    headers?: Record<string, string>;
+    headers?: Record<string, string | string[]>;
     body?: Record<string, unknown>;
     merge?: boolean;
   }>;
@@ -35,17 +41,246 @@ export interface StacServerItem {
   id: string;
   collection?: string;
   properties: Record<string, unknown>;
-  assets: Record<string, { href: string; type?: string; title?: string }>;
+  assets: Record<
+    string,
+    { href: string; type?: string; title?: string; [key: string]: unknown }
+  >;
 }
 
-export interface ResolvedCidFromServer {
+export interface ResolvedCidFromServer extends StacReleaseMetadata {
   cid: string;
   collectionId: string;
   dataset: string;
   variant: string;
+  zarrResolutions: StacZarrResolution[];
 }
 
 const MAX_STAC_SEARCH_PAGES = 50;
+
+type StacSearchBody = Record<string, unknown> | undefined;
+type StacSearchHeaders = Record<string, string>;
+
+interface StacSearchPage<T> {
+  features?: T[];
+  links?: unknown;
+}
+
+interface StacSearchRequest {
+  url: string;
+  method: "GET" | "POST";
+  body: StacSearchBody;
+  headers: StacSearchHeaders;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringHeaders(value: unknown): StacSearchHeaders {
+  if (!isRecord(value)) return {};
+
+  const headers: StacSearchHeaders = {};
+  for (const [name, headerValue] of Object.entries(value)) {
+    if (typeof headerValue === "string") {
+      headers[name] = headerValue;
+    } else if (
+      Array.isArray(headerValue) &&
+      headerValue.every((entry) => typeof entry === "string")
+    ) {
+      headers[name] = headerValue.join(", ");
+    }
+  }
+  return headers;
+}
+
+function stableJson(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  }
+  if (isRecord(value)) {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function resolveServerUrl(serverUrl: string): string {
+  const locationHref =
+    typeof globalThis.location === "undefined"
+      ? undefined
+      : globalThis.location.href;
+  return locationHref
+    ? new URL(serverUrl, locationHref).toString()
+    : new URL(serverUrl).toString();
+}
+
+function normalizedOrigin(url: string): string {
+  const parsed = new URL(url);
+  const protocol = parsed.protocol.toLowerCase();
+  const hostname = parsed.hostname.replace(/\.+$/, "").toLowerCase();
+  const port =
+    parsed.port || (protocol === "http:" ? "80" : protocol === "https:" ? "443" : "");
+  return `${protocol}//${hostname}:${port}`;
+}
+
+function sanitizedUrl(url: URL): string {
+  const sanitized = new URL(url);
+  sanitized.username = "";
+  sanitized.password = "";
+  sanitized.search = "";
+  sanitized.hash = "";
+  return sanitized.toString();
+}
+
+function nextSearchRequest<T>(
+  serverUrl: string,
+  currentUrl: string,
+  originalBody: Record<string, unknown>,
+  page: StacSearchPage<T>
+): StacSearchRequest | undefined {
+  const links = Array.isArray(page.links) ? page.links : [];
+  const nextLink = links.find(
+    (link) => isRecord(link) && link.rel === "next" && Boolean(link.href)
+  );
+  if (!isRecord(nextLink)) return undefined;
+  if (typeof nextLink.href !== "string") {
+    throw new Error("STAC pagination link href must be a string");
+  }
+
+  const parsedNextUrl = new URL(nextLink.href, currentUrl);
+  const nextUrl = parsedNextUrl.toString();
+  if (
+    normalizedOrigin(nextUrl) !== normalizedOrigin(serverUrl) ||
+    parsedNextUrl.username !== "" ||
+    parsedNextUrl.password !== ""
+  ) {
+    throw new Error(
+      `STAC pagination link must use the configured server origin ${normalizedOrigin(serverUrl)}: ${sanitizedUrl(parsedNextUrl)}`
+    );
+  }
+
+  const method = String(nextLink.method ?? "GET").toUpperCase();
+  if (method !== "GET" && method !== "POST") {
+    throw new Error(
+      `STAC pagination link uses an unsupported method: '${method}'`
+    );
+  }
+
+  // Continuation headers may contain credentials. Forward them only after
+  // validating an encrypted same-origin link; plaintext endpoints still
+  // paginate, but without server-supplied headers.
+  const headers =
+    parsedNextUrl.protocol.toLowerCase() === "https:"
+      ? stringHeaders(nextLink.headers)
+      : {};
+
+  let body: StacSearchBody;
+  if (isRecord(nextLink.body)) {
+    body = nextLink.merge
+      ? { ...originalBody, ...nextLink.body }
+      : nextLink.body;
+  } else if (nextLink.merge) {
+    body = { ...originalBody };
+  } else {
+    body = undefined;
+  }
+
+  return { url: nextUrl, method, body, headers };
+}
+
+function requestUrl(request: StacSearchRequest): string {
+  const url = new URL(request.url);
+  if (request.method === "GET" && request.body) {
+    for (const [key, value] of Object.entries(request.body)) {
+      url.searchParams.delete(key);
+      if (Array.isArray(value)) {
+        for (const item of value) url.searchParams.append(key, String(item));
+      } else if (value !== undefined && value !== null) {
+        url.searchParams.set(key, String(value));
+      }
+    }
+  }
+  url.hash = "";
+  return url.toString();
+}
+
+async function fetchSearchPage<T>(
+  request: StacSearchRequest
+): Promise<StacSearchPage<T>> {
+  const response = await fetch(requestUrl(request), {
+    method: request.method,
+    redirect: "manual",
+    headers:
+      request.method === "POST"
+        ? { "Content-Type": "application/json", ...request.headers }
+        : request.headers,
+    ...(request.method === "POST"
+      ? { body: JSON.stringify(request.body ?? {}) }
+      : {}),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`STAC server error ${response.status}: ${text}`);
+  }
+  const page = (await response.json()) as StacSearchPage<T>;
+  if (!isRecord(page)) {
+    throw new Error("STAC server returned an invalid search response");
+  }
+  if (page.features !== undefined && !Array.isArray(page.features)) {
+    throw new Error("STAC server returned invalid search features");
+  }
+  return page;
+}
+
+async function* searchPages<T>(
+  serverUrl: string,
+  originalBody: Record<string, unknown>
+): AsyncGenerator<StacSearchPage<T>> {
+  const resolvedServerUrl = resolveServerUrl(serverUrl);
+  let request: StacSearchRequest = {
+    url: `${resolvedServerUrl.replace(/\/+$/, "")}/search`,
+    method: "POST",
+    body: originalBody,
+    headers: {},
+  };
+  const seen = new Set<string>();
+
+  for (let pageNumber = 0; pageNumber < MAX_STAC_SEARCH_PAGES; pageNumber++) {
+    const pageKey = [
+      request.method,
+      requestUrl(request),
+      stableJson(
+        request.method === "POST" ? (request.body ?? {}) : undefined
+      ),
+      stableJson(request.headers),
+    ].join("\n");
+    if (seen.has(pageKey)) {
+      throw new Error(
+        "STAC server pagination repeated a request; results truncated"
+      );
+    }
+    seen.add(pageKey);
+
+    const page = await fetchSearchPage<T>(request);
+    yield page;
+
+    const nextRequest = nextSearchRequest(
+      resolvedServerUrl,
+      request.url,
+      originalBody,
+      page
+    );
+    if (!nextRequest) return;
+    request = nextRequest;
+  }
+
+  throw new Error(
+    `STAC server pagination exceeded ${MAX_STAC_SEARCH_PAGES} pages; results truncated`
+  );
+}
 
 function datasetIdFromItemId(
   itemId: string,
@@ -98,76 +333,9 @@ export async function resolveCidFromStacServer(
     collections: [collection],
   };
 
-  const searchUrl = `${serverUrl}/search`;
-  // The URL that produced the current response; relative `next` hrefs resolve
-  // against this, not the server root.
-  let currentUrl = searchUrl;
-  let response = await fetch(searchUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
   const features: StacServerItem[] = [];
-  for (let page = 0; page < MAX_STAC_SEARCH_PAGES; page++) {
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(`STAC server error ${response.status}: ${text}`);
-    }
-
-    const data: StacServerSearchResponse = await response.json();
-    features.push(...(data.features || []));
-
-    const nextLink = data.links?.find(
-      (link) =>
-        typeof link === "object" &&
-        link !== null &&
-        link.rel === "next" &&
-        typeof link.href === "string"
-    );
-    if (!nextLink) {
-      break;
-    }
-    if (page === MAX_STAC_SEARCH_PAGES - 1) {
-      // A next link remains but we've hit the page cap. Surface the truncation
-      // instead of returning a silently partial result set, so callers can
-      // distinguish "not found" from "not yet fetched" (and fall back to the
-      // full IPFS catalog walk).
-      throw new Error(
-        `STAC server pagination for '${collection}' exceeded ${MAX_STAC_SEARCH_PAGES} pages; results truncated`
-      );
-    }
-
-    // STAC API pagination: next links may be plain GET hrefs, or POST links
-    // carrying a token body (the dClimate server's shape) that must be
-    // re-POSTed. Per the STAC API link contract, a link may also carry
-    // `headers` (e.g. a header-based cursor), and `merge` governs both body and
-    // headers: merge them onto the original request when true, otherwise the
-    // link's values replace them. Resolve relative hrefs against the URL that
-    // produced this response (the /search endpoint), not the server root, so a
-    // bare `?token=…` targets /search.
-    const nextUrl = new URL(nextLink.href, currentUrl).toString();
-    const baseHeaders: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    const nextHeaders = nextLink.merge
-      ? { ...baseHeaders, ...(nextLink.headers ?? {}) }
-      : nextLink.headers ?? baseHeaders;
-    if ((nextLink.method ?? "GET").toUpperCase() === "POST") {
-      const nextBody = nextLink.merge
-        ? { ...body, ...(nextLink.body ?? {}) }
-        : nextLink.body ?? body;
-      response = await fetch(nextUrl, {
-        method: "POST",
-        // Content-Type is a floor for the JSON body even if a replacing
-        // (non-merge) link omits it.
-        headers: { "Content-Type": "application/json", ...nextHeaders },
-        body: JSON.stringify(nextBody),
-      });
-    } else {
-      response = await fetch(nextUrl, { headers: nextHeaders });
-    }
-    currentUrl = nextUrl;
+  for await (const page of searchPages<StacServerItem>(serverUrl, body)) {
+    features.push(...(page.features ?? []));
   }
 
   // Filter to the exact dataset. A prefix match would conflate datasets such
@@ -214,18 +382,33 @@ export async function resolveCidFromStacServer(
   }
 
   // Extract CID from asset
-  const href = selectedItem.assets?.data?.href || "";
-  if (!href) {
+  const zarrResolutions = getStacZarrResolutions(selectedItem.assets);
+  const dataAsset =
+    selectedItem.assets?.data ??
+    (zarrResolutions[0]
+      ? selectedItem.assets[zarrResolutions[0].assetKey]
+      : undefined);
+  const href = dataAsset?.href || "";
+  const advertisedCid = getStringProperty(
+    selectedItem.properties,
+    "dclimate:latest_dataset_cid"
+  );
+  const rawCid = href || advertisedCid || "";
+  if (!rawCid) {
     throw new Error(`Item '${selectedItem.id}' has no data asset`);
   }
 
-  const cid = href.startsWith("ipfs://") ? href.replace("ipfs://", "") : href;
+  const cid = rawCid.startsWith("ipfs://")
+    ? rawCid.replace("ipfs://", "")
+    : rawCid;
 
   return {
     cid,
     collectionId: collection,
     dataset,
     variant: resolvedVariant,
+    zarrResolutions,
+    ...getStacReleaseMetadata(selectedItem.properties),
   };
 }
 
@@ -262,10 +445,6 @@ interface StacServerSearchFeature {
   properties: Record<string, unknown>;
 }
 
-interface StacServerSearchPage {
-  features: StacServerSearchFeature[];
-}
-
 function stripIpfsScheme(cid: string | undefined): string | undefined {
   if (!cid) return undefined;
   return cid.startsWith("ipfs://") ? cid.replace(/^ipfs:\/\//, "") : cid;
@@ -290,20 +469,28 @@ function stripIpfsScheme(cid: string | undefined): string | undefined {
  *   - Category (historical/forecast) isn't populated here — the IPFS walker
  *     pulls it from `dclimate:collections:<category>` on the org link, which
  *     has no STAC API equivalent.
- *   - The fixed `limit: 1000` covers today's catalog (~45 items) by a wide
- *     margin. If the catalog grows past that, switch to following the
- *     STAC `next` link instead of a single request.
+ *   - Search pagination is bounded and repeated requests are detected to avoid
+ *     looping on malformed `next` links.
  */
 export async function listAvailableDatasetsFromStacServer(
   serverUrl: string = DEFAULT_STAC_SERVER_URL
 ): Promise<DatasetCatalog> {
-  const [collectionsResp, searchResp] = await Promise.all([
-    fetch(`${serverUrl}/collections`),
-    fetch(`${serverUrl}/search`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ limit: 1000 }),
+  const resolvedServerUrl = resolveServerUrl(serverUrl);
+  const searchFeaturesPromise = (async () => {
+    const features: StacServerSearchFeature[] = [];
+    for await (const page of searchPages<StacServerSearchFeature>(
+      resolvedServerUrl,
+      { limit: 100 }
+    )) {
+      features.push(...(page.features ?? []));
+    }
+    return features;
+  })();
+  const [collectionsResp, searchFeatures] = await Promise.all([
+    fetch(`${resolvedServerUrl.replace(/\/+$/, "")}/collections`, {
+      redirect: "manual",
     }),
+    searchFeaturesPromise,
   ]);
 
   if (!collectionsResp.ok) {
@@ -312,15 +499,7 @@ export async function listAvailableDatasetsFromStacServer(
       `STAC server /collections error ${collectionsResp.status}: ${text}`
     );
   }
-  if (!searchResp.ok) {
-    const text = await searchResp.text();
-    throw new Error(
-      `STAC server /search error ${searchResp.status}: ${text}`
-    );
-  }
-
   const collectionsBody = (await collectionsResp.json()) as StacServerCollectionsResponse;
-  const searchBody = (await searchResp.json()) as StacServerSearchPage;
 
   interface CollectionAccumulator {
     title?: string;
@@ -343,7 +522,7 @@ export async function listAvailableDatasetsFromStacServer(
     });
   }
 
-  for (const feature of searchBody.features ?? []) {
+  for (const feature of searchFeatures) {
     const collectionId =
       feature.collection ??
       (feature.id.includes("-") ? feature.id.split("-")[0] : undefined);

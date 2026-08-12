@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Dataset } from "@dclimate/jaxray";
 import { DClimateClient } from "../src/index.js";
 import { StacResolutionError } from "../src/stac/index.js";
+import {
+  ConflictingResolutionSelectionError,
+  MultiresolutionSelectionRequiredError,
+  ResolutionNotAvailableError,
+} from "../src/errors.js";
 
 const openDatasetFromCidMock = vi.hoisted(() => vi.fn());
 
@@ -24,6 +29,97 @@ describe("loadDataset CID resolution", () => {
   });
 
   describe("STAC catalog resolution", () => {
+    it("requires and resolves an explicit pyramid resolution or group", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => ({
+          ok: true,
+          status: 200,
+          text: async () => "",
+          json: async () => ({
+            type: "FeatureCollection",
+            links: [],
+            features: [
+              {
+                type: "Feature",
+                id: "test_grouped-pyramid-default",
+                collection: "test_grouped",
+                properties: {
+                  "dclimate:dataset_id": "pyramid",
+                  "dclimate:variant": "default",
+                },
+                assets: {
+                  "data-500m": {
+                    href: "ipfs://bafygrouped",
+                    "dclimate:zarr_group": "0",
+                    "dclimate:spatial_resolution": "500m",
+                  },
+                  "data-2km": {
+                    href: "ipfs://bafygrouped",
+                    "dclimate:zarr_group": "2",
+                    "dclimate:spatial_resolution": "2km",
+                  },
+                },
+              },
+            ],
+          }),
+        }))
+      );
+      const client = new DClimateClient({ stacServerUrl: "https://stac.test" });
+
+      await expect(
+        client.loadDataset({
+          request: { collection: "test_grouped", dataset: "pyramid" },
+        })
+      ).rejects.toBeInstanceOf(MultiresolutionSelectionRequiredError);
+
+      const [, discoveredMetadata] = await client.loadDataset({
+        request: {
+          collection: "test_grouped",
+          dataset: "pyramid",
+          resolution: "500m",
+        },
+      });
+      expect(openDatasetFromCidMock).toHaveBeenLastCalledWith(
+        "bafygrouped",
+        expect.objectContaining({ zarrGroup: "0" })
+      );
+      expect(discoveredMetadata.zarrGroup).toBe("0");
+      expect(discoveredMetadata.resolution).toBe("500m");
+
+      const [, overriddenMetadata] = await client.loadDataset({
+        request: { collection: "test_grouped", dataset: "pyramid" },
+        options: { zarrGroup: "/2/" },
+      });
+      expect(openDatasetFromCidMock).toHaveBeenLastCalledWith(
+        "bafygrouped",
+        expect.objectContaining({ zarrGroup: "2" })
+      );
+      expect(overriddenMetadata.zarrGroup).toBe("2");
+      expect(overriddenMetadata.resolution).toBe("2km");
+
+      await expect(
+        client.loadDataset({
+          request: {
+            collection: "test_grouped",
+            dataset: "pyramid",
+            resolution: "8km",
+          },
+        })
+      ).rejects.toBeInstanceOf(ResolutionNotAvailableError);
+
+      await expect(
+        client.loadDataset({
+          request: {
+            collection: "test_grouped",
+            dataset: "pyramid",
+            resolution: "500m",
+          },
+          options: { zarrGroup: "0" },
+        })
+      ).rejects.toBeInstanceOf(ConflictingResolutionSelectionError);
+    });
+
     it("resolves CID from STAC for known dataset", async () => {
       const client = new DClimateClient();
       await client.loadDataset({
@@ -155,6 +251,23 @@ describe("loadDataset CID resolution", () => {
         expect.objectContaining({ zarrGroup: "0" })
       );
       expect(metadata.zarrGroup).toBe("0");
+    });
+
+    it("requires raw groups instead of resolutions for direct CIDs", async () => {
+      const client = new DClimateClient();
+
+      await expect(
+        client.loadDataset({
+          request: { cid: "bafygrouped", resolution: "500m" },
+        })
+      ).rejects.toBeInstanceOf(ResolutionNotAvailableError);
+
+      await expect(
+        client.loadDataset({
+          request: { cid: "bafygrouped", resolution: "500m" },
+          options: { zarrGroup: "0" },
+        })
+      ).rejects.toBeInstanceOf(ConflictingResolutionSelectionError);
     });
 
     it("passes sparse shard decoding through to the dataset opener", async () => {

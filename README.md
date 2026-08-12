@@ -122,6 +122,77 @@ Reads go over the IPFS HTTP gateway, so no local daemon is required and the same
 code runs in a browser. Resolution is by CID for now; STAC catalog support will
 follow.
 
+### Dataset version history
+
+For datasets that advertise version history in STAC, the client follows the
+item's `dclimate:versions_api` URL. STAC therefore selects Hydrogen, Tritium,
+or a future version service without a client-side dataset routing table.
+
+```typescript
+const versions = await client.listDatasetVersions({
+  collection: "noaa_aigfs",
+  dataset: "wind_u_forecast",
+  variant: "operational",
+  filters: {
+    anchored: true,
+    isCitable: true,
+    versionLabel: "2026-08",
+  },
+});
+
+for (const release of versions.versions) {
+  console.log(release.versionLabel, release.cid);
+}
+
+const exactVersion = await client.getDatasetVersion({
+  collection: "noaa_aigfs",
+  dataset: "wind_u_forecast",
+  variant: "operational",
+  commitId: "commit-id",
+});
+
+console.log(exactVersion.cid);
+```
+
+The low-level `listVersionsFromUrl`, `getExactVersionFromUrl`, and
+`getCitationFromUrl` helpers are also exported for applications that already
+have the complete URLs. Items backed by hard-coded CIDs may not advertise a
+version-history service.
+
+### Multiresolution datasets
+
+Pyramidal datasets require an explicit resolution (recommended) or raw Zarr
+group. The client reports the available resolutions instead of silently
+choosing between different precision, chunking, and fetching strategies.
+
+```typescript
+const [data, metadata] = await client.loadDataset({
+  request: {
+    collection: "copernicus_clms",
+    dataset: "fpar",
+    resolution: "2km",
+  },
+});
+
+console.log(metadata.resolution, metadata.zarrGroup);
+```
+
+FPAR advertises `500m` → group `"0"`, `2km` → group `"1"`, and `8km` →
+group `"2"`. Change `request.resolution` to select any of those levels. A raw
+`options.zarrGroup` is supported for storage-aware callers, but must not be
+combined with `request.resolution`.
+
+During migration, STAC may also contain a legacy `assets.data` alias for the
+500 m asset. The client ignores it when building the three choices, and it is
+neither a fourth resolution nor a default. Consumers relying on `assets.data`
+or implicit group `"0"` should migrate before the alias is removed in a future
+breaking release.
+
+Direct CID requests have no STAC resolution mapping and must use
+`options.zarrGroup` when the store contains multiple groups; a human-readable
+resolution is rejected. STAC's internal `metadataGroup` controls only catalog
+metadata extraction and never selects a client resolution.
+
 ### Siren REST API usage
 
 Use Siren methods by configuring `siren` in the client options.
@@ -345,6 +416,22 @@ catalog.forEach(({ collection, datasets }) => {
 });
 ```
 
+### Resolving a CID directly
+
+Use the public STAC resolver when you need the selected CID and variant without loading the dataset. The API is natively asynchronous and uses the platform's pooled `fetch` implementation.
+
+```typescript
+import { resolveCidFromStacServer } from "@dclimate/dclimate-client-js";
+
+const resolved = await resolveCidFromStacServer(
+  "ecmwf_aifs",
+  "temperature_forecast",
+  "single"
+);
+
+console.log(resolved.cid, resolved.variant);
+```
+
 ## Configuration
 
 ### Client options
@@ -405,6 +492,12 @@ Metric attributes include the gateway URL, store type, and status. The dataset C
 - `selectDataset({ request, selection, options })` - Load and apply selections in one call
 - `listAvailableDatasets()` - Get the full dataset catalog
 - `siren` - Namespaced Siren REST API client (getter; throws `SirenNotConfiguredError` unless `siren` is configured)
+
+### STAC utilities
+
+- `resolveCidFromStacServer(collection, dataset, variant?, serverUrl?)` - Resolve a CID and selected variant without loading the dataset
+- `resolveDatasetCidFromStacServer(collection, dataset, variant?, serverUrl?)` - Resolve only the CID string
+- `listAvailableDatasetsFromStacServer(serverUrl?)` - List collections, datasets, and variants directly from the paginated STAC API
 
 ### SirenClient (via `client.siren` or standalone)
 

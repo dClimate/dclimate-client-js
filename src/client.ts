@@ -4,12 +4,21 @@ import {
   ClientOptions,
   DatasetMetadata,
   DatasetRequest,
+  DatasetVersionRequest,
+  DatasetVersionsRequest,
   GeoSelectionOptions,
   LoadDatasetOptions,
 } from "./types.js";
 import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
-import { DatasetNotFoundError, SirenNotConfiguredError } from "./errors.js";
+import {
+  DatasetNotFoundError,
+  ConflictingResolutionSelectionError,
+  MultiresolutionSelectionRequiredError,
+  ResolutionNotAvailableError,
+  SirenNotConfiguredError,
+  VersionHistoryUnavailableError,
+} from "./errors.js";
 import { normalizeSegment } from "./utils.js";
 
 import { concatenateVariants, type VariantToLoad } from "./actions/concatenate-variants.js";
@@ -20,6 +29,8 @@ import {
   listAvailableDatasetsFromStac,
   type StacCatalog,
   type ConcatenableStacItem,
+  type ResolvedDatasetFromStac,
+  type StacZarrResolution,
 } from "./stac/index.js";
 import { DatasetCatalog } from "./stac/stac-catalog.js";
 import {
@@ -29,10 +40,66 @@ import {
 } from "./stac/stac-server.js";
 import { SirenClient } from "./siren/siren-client.js";
 import { StationsClient } from "./stations/stations-client.js";
+import {
+  getExactVersionFromUrl,
+  listVersionsFromUrl,
+} from "./versions/version-client.js";
+import type {
+  DatasetVersion,
+  DatasetVersionListing,
+} from "./versions/types.js";
 
 function normalizeZarrGroup(group?: string): string | undefined {
   const normalized = group?.replace(/^\/+/, "").replace(/\/+$/, "");
   return normalized || undefined;
+}
+
+function resolveZarrSelection(
+  choices: StacZarrResolution[],
+  resolution?: string,
+  zarrGroup?: string
+): { zarrGroup?: string; resolution?: string } {
+  if (resolution && zarrGroup) {
+    throw new ConflictingResolutionSelectionError(
+      "Pass either request.resolution or options.zarrGroup, not both."
+    );
+  }
+  if (resolution) {
+    const match = choices.find((choice) => choice.resolution === resolution);
+    if (!match) {
+      const available = choices.map((choice) => choice.resolution);
+      throw new ResolutionNotAvailableError(
+        `Resolution '${resolution}' is not available.` +
+          (available.length ? ` Choose one of: ${available.join(", ")}.` : "")
+      );
+    }
+    return { zarrGroup: match.group, resolution: match.resolution };
+  }
+  if (zarrGroup) {
+    const normalized = normalizeZarrGroup(zarrGroup);
+    const match = choices.find((choice) => choice.group === normalized);
+    if (choices.length && !match) {
+      throw new ResolutionNotAvailableError(
+        `Zarr group '${normalized}' is not available. Choose one of: ${choices
+          .map((choice) => choice.group)
+          .join(", ")}.`
+      );
+    }
+    return { zarrGroup: normalized, resolution: match?.resolution };
+  }
+  if (choices.length > 1) {
+    throw new MultiresolutionSelectionRequiredError(
+      `This dataset has multiple resolutions; pass request.resolution or options.zarrGroup. Available resolutions: ${choices
+        .map((choice) => choice.resolution)
+        .join(", ")}.`,
+      choices.map((choice) => choice.resolution),
+      choices.map((choice) => choice.group)
+    );
+  }
+  if (choices.length === 1) {
+    return { zarrGroup: choices[0].group, resolution: choices[0].resolution };
+  }
+  return {};
 }
 
 export class DClimateClient {
@@ -91,6 +158,95 @@ export class DClimateClient {
     return this.listAvailableDatasets();
   }
 
+  private async resolveDatasetDetails(
+    request: DatasetRequest,
+    gatewayUrl: string = this.gatewayUrl
+  ): Promise<ResolvedDatasetFromStac> {
+    if (!request.collection || !request.dataset) {
+      throw new DatasetNotFoundError(
+        "Collection and dataset names must be provided."
+      );
+    }
+
+    const collection =
+      request.organization &&
+      !request.collection.startsWith(`${request.organization}_`)
+        ? `${request.organization}_${request.collection}`
+        : request.collection;
+
+    if (this.stacServerUrl) {
+      try {
+        const resolved = await resolveCidFromStacServer(
+          collection,
+          request.dataset,
+          request.variant,
+          this.stacServerUrl
+        );
+        return {
+          ...resolved,
+          organizationId:
+            request.organization ??
+            (resolved.collectionId.includes("_")
+              ? resolved.collectionId.split("_")[0]
+              : undefined),
+        };
+      } catch {
+        // Fall through to the IPFS-hosted STAC catalog.
+      }
+    }
+
+    const catalog = await this.getStacCatalog(gatewayUrl);
+    return resolveDatasetFromStac(
+      catalog,
+      collection,
+      request.dataset,
+      request.variant,
+      request.organization
+    );
+  }
+
+  async listDatasetVersions({
+    collection,
+    dataset,
+    variant,
+    organization,
+    filters,
+  }: DatasetVersionsRequest): Promise<DatasetVersionListing> {
+    const resolved = await this.resolveDatasetDetails({
+      collection,
+      dataset,
+      variant,
+      organization,
+    });
+    if (!resolved.versionsApi) {
+      throw new VersionHistoryUnavailableError(
+        `Version history is not available for ${collection}/${dataset}/${resolved.variant}.`
+      );
+    }
+    return listVersionsFromUrl(resolved.versionsApi, filters);
+  }
+
+  async getDatasetVersion({
+    collection,
+    dataset,
+    commitId,
+    variant,
+    organization,
+  }: DatasetVersionRequest): Promise<DatasetVersion> {
+    const resolved = await this.resolveDatasetDetails({
+      collection,
+      dataset,
+      variant,
+      organization,
+    });
+    if (!resolved.versionsApi) {
+      throw new VersionHistoryUnavailableError(
+        `Version history is not available for ${collection}/${dataset}/${resolved.variant}.`
+      );
+    }
+    return getExactVersionFromUrl(resolved.versionsApi, commitId);
+  }
+
   /**
    * Access the Siren REST API client (metric data, regions, metrics).
    * Namespaced so Siren stays separate from the core dataset API:
@@ -133,17 +289,30 @@ export class DClimateClient {
   }): Promise<[GeoTemporalDataset, DatasetMetadata] | [Dataset, DatasetMetadata]> {
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
-    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
+    const explicitZarrGroup = normalizeZarrGroup(options.zarrGroup);
 
 
     if (request.cid) {
+      if (request.resolution && explicitZarrGroup) {
+        throw new ConflictingResolutionSelectionError(
+          "Pass either request.resolution or options.zarrGroup, not both."
+        );
+      }
+      if (request.resolution) {
+        throw new ResolutionNotAvailableError(
+          "request.resolution requires STAC metadata; pass options.zarrGroup for a direct CID."
+        );
+      }
       // Direct CID provided - bypass catalog
       const dataset = await openDatasetFromCid(request.cid, {
         gatewayUrl,
         ipfsElements,
-        zarrGroup,
+        zarrGroup: explicitZarrGroup,
         shardReadMode: options.shardReadMode,
       });
+      const openedZarrGroup =
+        explicitZarrGroup ??
+        normalizeZarrGroup(dataset.attrs?._ipfs_zarr_group as string | undefined);
 
       const metadata: DatasetMetadata = {
         dataset: "",
@@ -154,7 +323,7 @@ export class DClimateClient {
         path: "",
         cid: request.cid,
         fetchedAt: new Date(),
-        ...(zarrGroup ? { zarrGroup } : {}),
+        ...(openedZarrGroup ? { zarrGroup: openedZarrGroup } : {}),
       };
     if (options.returnJaxrayDataset) {
       return [dataset, metadata];
@@ -168,7 +337,7 @@ export class DClimateClient {
 
     const normalizedDatasetKey = normalizeSegment(request.dataset);
     const autoConcatenate = options.autoConcatenate;
-    let resolvedOrganization = request.organization;
+    const resolvedOrganization = request.organization;
     let resolvedCollection = request.collection;
 
     if (
@@ -226,50 +395,26 @@ export class DClimateClient {
     }
 
     // Fall back to single variant loading
-    let cid: string | null = null;
-    let metadataDataset = request.dataset;
-    let metadataCollection = resolvedCollection || request.collection;
-    let metadataVariant = request.variant ?? "";
-    let metadataOrganization = resolvedOrganization;
-
-    // Try STAC server first (faster, avoids loading IPFS catalog)
-    if (this.stacServerUrl && resolvedCollection) {
-      try {
-        const serverResolved = await resolveCidFromStacServer(
-          resolvedCollection,
-          request.dataset,
-          request.variant,
-          this.stacServerUrl
-        );
-        cid = serverResolved.cid;
-        metadataCollection = serverResolved.collectionId;
-        metadataVariant = serverResolved.variant || "";
-        metadataDataset = serverResolved.dataset;
-      } catch {
-        // Fall back to IPFS catalog
-      }
-    }
-
-    // Fallback: Use STAC catalog resolution from IPFS
-    if (!cid) {
-      const catalog = await this.getStacCatalog(gatewayUrl);
-
-      const resolved = resolveDatasetFromStac(
-        catalog,
-        resolvedCollection || request.collection || "",
-        request.dataset,
-        request.variant,
-        resolvedOrganization
-      );
-
-      // Update metadata with resolved values
-      cid = resolved.cid;
-      metadataCollection = resolved.collectionId;
-      metadataVariant = resolved.variant || "";
-      resolvedOrganization = resolved.organizationId ?? resolvedOrganization;
-      metadataOrganization = resolved.organizationId ?? resolvedOrganization;
-      metadataDataset = request.dataset;
-    }
+    const resolved = await this.resolveDatasetDetails(
+      {
+        ...request,
+        collection: resolvedCollection || request.collection,
+        organization: resolvedOrganization,
+      },
+      gatewayUrl
+    );
+    const cid = resolved.cid;
+    const metadataDataset = resolved.dataset;
+    const metadataCollection = resolved.collectionId;
+    const metadataVariant = resolved.variant || "";
+    const metadataOrganization =
+      resolved.organizationId ?? resolvedOrganization;
+    const zarrSelection = resolveZarrSelection(
+      resolved.zarrResolutions,
+      request.resolution,
+      explicitZarrGroup
+    );
+    const zarrGroup = zarrSelection.zarrGroup;
 
     // Build path from resolved names
     const pathParts = [metadataCollection, metadataDataset, metadataVariant].filter(Boolean);
@@ -291,7 +436,24 @@ export class DClimateClient {
       cid: cid,
       source: "stac",
       fetchedAt: new Date(),
+      ...(resolved.versionsApi ? { versionsApi: resolved.versionsApi } : {}),
+      ...(resolved.provenanceApi
+        ? { provenanceApi: resolved.provenanceApi }
+        : {}),
+      ...(resolved.citationApi ? { citationApi: resolved.citationApi } : {}),
+      ...(resolved.streamId ? { streamId: resolved.streamId } : {}),
+      ...(resolved.commitId ? { commitId: resolved.commitId } : {}),
+      ...(resolved.versionLabel ? { versionLabel: resolved.versionLabel } : {}),
+      ...(resolved.isCitable !== undefined
+        ? { isCitable: resolved.isCitable }
+        : {}),
+      ...(resolved.retentionClass
+        ? { retentionClass: resolved.retentionClass }
+        : {}),
       ...(zarrGroup ? { zarrGroup } : {}),
+      ...(zarrSelection.resolution
+        ? { resolution: zarrSelection.resolution }
+        : {}),
     };
 
     if (!metadata.organization && metadata.collection?.includes("_")) {
@@ -333,7 +495,7 @@ export class DClimateClient {
     }
     const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
     const ipfsElements = this.resolveIpfsElements(options, gatewayUrl);
-    const zarrGroup = normalizeZarrGroup(options.zarrGroup);
+    const explicitZarrGroup = normalizeZarrGroup(options.zarrGroup);
 
     // Order by concatPriority so metadata (concatenatedVariants, cid)
     // reflects the same order the data is concatenated in.
@@ -342,8 +504,14 @@ export class DClimateClient {
     );
 
     // Load all variants in parallel
-    const variantsToLoad: VariantToLoad[] = await Promise.all(
+    const loadedVariants = await Promise.all(
       orderedVariants.map(async (variantConfig) => {
+        const zarrSelection = resolveZarrSelection(
+          variantConfig.zarrResolutions,
+          request.resolution,
+          explicitZarrGroup
+        );
+        const zarrGroup = zarrSelection.zarrGroup;
         // Load the dataset using the CID from STAC
         const dataset = await openDatasetFromCid(variantConfig.cid, {
           gatewayUrl,
@@ -355,12 +523,26 @@ export class DClimateClient {
         return {
           variant: variantConfig,
           dataset,
+          zarrSelection,
         };
       })
     );
+    const variantsToLoad: VariantToLoad[] = loadedVariants;
 
     // Concatenate the variants
     const concatenatedDataset = await concatenateVariants(variantsToLoad);
+    const firstSelection = loadedVariants[0].zarrSelection;
+    const commonZarrGroup = loadedVariants.every(
+      ({ zarrSelection }) => zarrSelection.zarrGroup === firstSelection.zarrGroup
+    )
+      ? firstSelection.zarrGroup
+      : undefined;
+    const commonResolution = loadedVariants.every(
+      ({ zarrSelection }) =>
+        zarrSelection.resolution === firstSelection.resolution
+    )
+      ? firstSelection.resolution
+      : undefined;
 
     // Build metadata for the concatenated dataset
     const pathParts = [request.collection, request.dataset].filter(Boolean);
@@ -374,7 +556,8 @@ export class DClimateClient {
       cid: variantsToLoad[0].dataset.attrs._zarr_cid as string || "concatenated",
       source: "stac_concatenated",
       fetchedAt: new Date(),
-      ...(zarrGroup ? { zarrGroup } : {}),
+      ...(commonZarrGroup ? { zarrGroup: commonZarrGroup } : {}),
+      ...(commonResolution ? { resolution: commonResolution } : {}),
     };
 
     if (options.returnJaxrayDataset) {
