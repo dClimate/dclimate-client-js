@@ -53,7 +53,7 @@
   "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
     "@dclimate/jaxray": "^0.7.0",
-    "@dclimate/tabular": "file:../dparquet",
+    "@dclimate/tabular": "^0.1.0",
     "@opentelemetry/api": "^1.9.1",
     "multiformats": "^14.0.4"
   },
