@@ -19,7 +19,11 @@
  *   --element <name>    Restrict to one element, e.g. TMAX, TMIN, PRCP (repeatable)
  *   --from <date>       ISO date, inclusive
  *   --to <date>         ISO date, inclusive
- *   --limit <n>         Rows to print (default 10; 0 prints all)
+ *   --limit <n>         Rows to print (default 10; 0 prints all). Prints only --
+ *                       the reader has no limit to push down, so every matching
+ *                       row is fetched regardless. Narrow the query to fetch less.
+ *   --max-rows <n>      Refuse to fetch more than this many rows (0 for no limit)
+ *   --max-bytes <n>     Refuse to fetch more than this many bytes (0 for no limit)
  *   --list              List every station first (walks the whole index)
  *   --plan              Show what would be fetched, then stop
  *
@@ -31,6 +35,18 @@ import { DClimateClient } from "../src/index.js";
 import type { StationDataset, StationInfo } from "@dclimate/tabular/reader";
 
 const DEFAULT_GATEWAY = "http://127.0.0.1:8080";
+
+/**
+ * What this script will fetch before refusing.
+ *
+ * Set where an accident is obvious but a deliberate query is not: a few million
+ * rows is far more than anyone reads at a terminal, and comfortably more than
+ * any single-station query produces even over a full archive. Both are
+ * overridable, because the ceiling exists to catch a mistake rather than to
+ * decide what a caller is allowed to want.
+ */
+const MAX_ROWS = 5_000_000;
+const MAX_BYTES = 512 * 1024 * 1024;
 
 interface Args {
   cid: string;
@@ -44,6 +60,8 @@ interface Args {
   plan: boolean;
   list: boolean;
   maxKm: number | null;
+  maxRows: number;
+  maxBytes: number;
 }
 
 const USAGE = `Usage:
@@ -61,6 +79,11 @@ Options:
                        stations' extent; walks the index unless --station
                        or --near narrowed the selection first)
   --limit <n>         Rows to print (default 10; 0 prints all)
+                      (printing only: every matching row is fetched either way)
+  --max-rows <n>      Refuse to fetch more than this many rows
+                      (default ${MAX_ROWS.toLocaleString()}; 0 for no limit)
+  --max-bytes <n>     Refuse to fetch more than this many bytes
+                      (default ${(MAX_BYTES / 1024 / 1024).toFixed(0)} MiB; 0 for no limit)
   --list              List every station first (walks the whole index)
   --plan              Show what would be fetched, then stop`;
 
@@ -77,6 +100,8 @@ function parseArgs(argv: string[]): Args {
     plan: false,
     list: false,
     maxKm: null,
+    maxRows: MAX_ROWS,
+    maxBytes: MAX_BYTES,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -102,6 +127,8 @@ function parseArgs(argv: string[]): Args {
       case "--plan": args.plan = true; break;
       case "--list": args.list = true; break;
       case "--max-km": args.maxKm = Number(value()); break;
+      case "--max-rows": args.maxRows = Number(value()); break;
+      case "--max-bytes": args.maxBytes = Number(value()); break;
       case "--near": {
         const parts = value().split(",");
         const lat = Number(parts[0]);
@@ -125,6 +152,17 @@ function parseArgs(argv: string[]): Args {
   }
   if (args.maxKm !== null && (!Number.isFinite(args.maxKm) || args.maxKm <= 0)) {
     throw new Error("--max-km must be a positive number");
+  }
+  // 0 disables the ceiling rather than setting it to nothing, so there is a way
+  // to say "yes, really, fetch it all" that does not require guessing a number
+  // larger than the dataset.
+  for (const [flag, size] of [
+    ["--max-rows", args.maxRows],
+    ["--max-bytes", args.maxBytes],
+  ] as const) {
+    if (!Number.isFinite(size) || size < 0) {
+      throw new Error(`${flag} must be a non-negative number (0 for no limit)`);
+    }
   }
   if (args.maxKm !== null && !args.near) {
     throw new Error("--max-km only applies with --near");
@@ -277,6 +315,35 @@ async function main(): Promise<void> {
   console.log(`      ${plan.stats.fragmentsPruned} fragment(s) pruned by statistics`);
 
   if (args.plan) return;
+
+  // `--limit` slices after the fact, because `toRecords()` has no limit to push
+  // down: the reader materializes every matching row before anything here can
+  // discard one. On a bare `<cid>` that means the default ten-row print would
+  // pull the whole dataset -- GHCND is ~136k stations of daily observations --
+  // and die on memory long before printing.
+  //
+  // The plan above already priced it, from index metadata rather than a fetch,
+  // so the check costs nothing extra. Refusing beats truncating silently: the
+  // limits exist to stop an accident, and a run that quietly returned the first
+  // slice of a dataset the caller never meant to ask for would look like a
+  // complete answer.
+  const overRows = args.maxRows > 0 && rows > args.maxRows;
+  const overBytes = args.maxBytes > 0 && bytes > args.maxBytes;
+  if (overRows || overBytes) {
+    const measured = overRows
+      ? `${rows.toLocaleString()} rows`
+      : `${(bytes / 1024 / 1024).toFixed(1)} MiB`;
+    const ceiling = overRows
+      ? `${args.maxRows.toLocaleString()} rows`
+      : `${(args.maxBytes / 1024 / 1024).toFixed(0)} MiB`;
+    throw new Error(
+      `This query reads ${measured}, over the ${ceiling} this script will fetch.\n` +
+        `  '--limit' only trims what is printed, so it cannot make this smaller.\n` +
+        `  Narrow it instead: --station or --near picks one station, --from/--to\n` +
+        `  a date range, --element one variable. Use --plan to price a query\n` +
+        `  without running it, or --max-rows / --max-bytes to raise the ceiling.`
+    );
+  }
 
   const started = Date.now();
   const element = args.elements.length === 1 ? args.elements[0] : undefined;

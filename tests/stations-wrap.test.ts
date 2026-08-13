@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
+import * as dagCbor from "@ipld/dag-cbor";
+import { CID } from "multiformats/cid";
 import {
+  blake3Hasher,
   DatasetIntegrityError,
   DatasetReaderError,
+  PredicateError,
+  RangeSourceError,
   StationDataset,
   StationSelectionError,
 } from "@dclimate/tabular/reader";
 import { wrapStationDataset } from "../src/stations/wrap.js";
+import { translateStationError } from "../src/stations/errors.js";
 import {
   DatasetCorruptError,
   DClimateClientError,
@@ -175,5 +181,107 @@ describe("wrapStationDataset", () => {
     // than come back as a wrapped function.
     const dataset = wrapStationDataset(fake({ rootCid: "bafyr4i" }));
     expect((dataset as unknown as { rootCid: string }).rootCid).toBe("bafyr4i");
+  });
+});
+
+/**
+ * A CID that resolves, to bytes that are not a station dataset.
+ *
+ * The tests above drive translation with hand-built errors, which proves the
+ * mapping but assumes the right errors arrive. These drive it through tabular's
+ * real decode path instead, so the error classes are whatever the reader
+ * genuinely throws -- the assumption is what is under test.
+ *
+ * Injected at the `RangeSource` seam rather than through `client.stations.load`
+ * because the gateway between them contributes nothing here: it would only
+ * re-fetch the same bytes over a stub `fetch`, and its retry backoff makes the
+ * test slow enough to time out.
+ */
+const sourceServing = (bytes: Uint8Array) => ({
+  cid: CID.createV1(0x71, blake3Hasher.digest(bytes)),
+  source: {
+    getBlock: async () => bytes,
+    getRange: async (_cid: unknown, offset: number, length: number) =>
+      bytes.slice(offset, offset + length),
+  } as never,
+});
+
+/** Mirrors `StationsClient.load`'s try/catch, minus the gateway. */
+const openLike = async (bytes: Uint8Array): Promise<never> => {
+  const { cid, source } = sourceServing(bytes);
+  try {
+    return (await StationDataset.open(source, cid)) as never;
+  } catch (cause) {
+    return translateStationError(cause);
+  }
+};
+
+describe("translateStationError on a valid CID holding non-station data", () => {
+  it("reports a well-formed block that is not a dataset root as corruption", async () => {
+    // A `WireError`: the CBOR decodes, but nothing in it says "dataset root".
+    const caught = await openLike(dagCbor.encode({ hello: "world" })).catch(
+      (error: unknown) => error
+    );
+
+    expect(caught).toBeInstanceOf(DatasetCorruptError);
+    // The tabular class survives in the text. It is the only thing that
+    // distinguishes these cases once they share a client-side type, and it is
+    // what a publisher needs to debug the CID they published.
+    expect((caught as Error).message).toContain("WireError");
+  });
+
+  it("reports a CID pointing at non-CBOR bytes as corruption", async () => {
+    // A `CodecError` rather than a `WireError`: this fails in the dag-cbor
+    // decode, before any field is looked at. A CID naming a UnixFS file --
+    // pasting the CID of a CSV instead of its dataset -- lands here.
+    const caught = await openLike(new Uint8Array([0xff, 0xff, 0xff, 0xff])).catch(
+      (error: unknown) => error
+    );
+
+    expect(caught).toBeInstanceOf(DatasetCorruptError);
+    expect((caught as Error).message).toContain("CodecError");
+  });
+
+  it("keeps every tabular error inside the client's own hierarchy", async () => {
+    // The promise this boundary exists to make: catching `DClimateClientError`
+    // is enough, and a caller never has to also know tabular's hierarchy.
+    for (const bytes of [
+      dagCbor.encode({ hello: "world" }),
+      dagCbor.encode({ version: 1, schema: "nope" }),
+      new Uint8Array([0xff, 0xff, 0xff, 0xff]),
+    ]) {
+      const caught = await openLike(bytes).catch((error: unknown) => error);
+      expect(caught).toBeInstanceOf(DClimateClientError);
+    }
+  });
+});
+
+describe("translateStationError classification", () => {
+  it("leaves a transport failure untranslated", () => {
+    // `RangeSourceError` descends from the same base as the corruption classes,
+    // so the base-class branch would swallow it as corruption if it were not
+    // checked first. A gateway blip is retryable and says nothing about the
+    // dataset; calling it corruption sends the caller to the publisher.
+    const failure = new RangeSourceError("Range exceeds block length");
+    expect(() => translateStationError(failure)).toThrow(RangeSourceError);
+    expect(() => translateStationError(failure)).not.toThrow(DatasetCorruptError);
+  });
+
+  it("reports a bad predicate as a bad selection, not corruption", () => {
+    // Comparing `gt` against a text column is an ordinary caller mistake --
+    // rewording the query fixes it -- so it must not be blamed on the data.
+    const failure = new PredicateError(
+      "Cannot apply 'gt' to non-numeric column NAME"
+    );
+    expect(() => translateStationError(failure)).toThrow(InvalidSelectionError);
+    expect(() => translateStationError(failure)).not.toThrow(DatasetCorruptError);
+  });
+
+  it("still rethrows errors that are not tabular's at all", () => {
+    // The base-class branch must not become a catch-all: a TypeError from a bug
+    // in this client is not a statement about the dataset.
+    const bug = new TypeError("x is not a function");
+    expect(() => translateStationError(bug)).toThrow(TypeError);
+    expect(() => translateStationError(bug)).not.toThrow(DClimateClientError);
   });
 });
