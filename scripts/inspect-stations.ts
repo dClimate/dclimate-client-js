@@ -57,6 +57,9 @@ Options:
   --element <name>    Restrict to one element, e.g. TMAX (repeatable)
   --from <date>       ISO date, inclusive
   --to <date>         ISO date, inclusive
+                      (passing only one widens the other to the selected
+                       stations' extent; walks the index unless --station
+                       or --near narrowed the selection first)
   --limit <n>         Rows to print (default 10; 0 prints all)
   --list              List every station first (walks the whole index)
   --plan              Show what would be fetched, then stop`;
@@ -126,6 +129,14 @@ function parseArgs(argv: string[]): Args {
   if (args.maxKm !== null && !args.near) {
     throw new Error("--max-km only applies with --near");
   }
+  // Both name a station set, and honouring one means ignoring the other. Since
+  // the output does not restate which ids were queried, silently dropping
+  // --station would print a confident answer for a station nobody asked about.
+  if (args.near && args.stations.length > 0) {
+    throw new Error(
+      "--near and --station both choose stations; pass one or the other"
+    );
+  }
   return args;
 }
 
@@ -186,14 +197,25 @@ async function applySelection(
 
   if (args.from || args.to) {
     // Either bound alone is meaningful, so the missing side widens to the
-    // dataset's own extent rather than forcing the caller to pass both.
-    // Widening costs a full index walk -- a block per station, ~136k reads on
-    // GHCND -- so only an actually-missing bound pays for it, and a query that
-    // supplies both never walks at all.
+    // covered extent rather than forcing the caller to pass both. A query that
+    // supplies both bounds never reads coverage at all.
     let start: Date | string = args.from ?? "";
     let end: Date | string = args.to ?? "";
     if (!args.from || !args.to) {
-      const covered = await dataset.listStations();
+      // Scoped to whatever --station/--near already picked, for both reasons:
+      // widening from every station would stretch the range to one no selected
+      // station covers -- a station retired in 1987 pulling `start` back decades
+      // before the station actually queried -- and `infoFor` resolves each named
+      // station with a single lookup instead of the index walk `listStations()`
+      // costs. Only an unfiltered query still pays for the walk, which it must,
+      // since it really is asking about every station.
+      const chosen = selected.toQuery().stations ?? [];
+      const covered =
+        chosen.length === 0
+          ? await selected.listStations()
+          : await Promise.all(
+              chosen.map((stationId) => selected.infoFor(stationId))
+            );
       // Folded rather than spread into Math.min/Math.max: at GHCND's station
       // count the spread exceeds V8's argument limit and throws.
       let earliest = Infinity;
