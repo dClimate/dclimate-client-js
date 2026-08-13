@@ -3,6 +3,9 @@
   "version": "0.9.0",
   "description": "JavaScript client for dClimate datasets using jaxray and IPFS stores",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "./dist/node/index.js",
   "module": "./dist/browser/index.js",
   "types": "./dist/node/index.d.ts",
@@ -53,7 +56,7 @@
   "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
     "@dclimate/jaxray": "^0.7.0",
-    "@dclimate/tabular": "^0.1.0",
+    "@dclimate/tabular": "^0.2.0",
     "@opentelemetry/api": "^1.9.1",
     "multiformats": "^14.0.4"
   },

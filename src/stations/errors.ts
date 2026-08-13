@@ -1,8 +1,13 @@
 import {
+  DatasetIntegrityError,
   DatasetReaderError,
   StationSelectionError,
 } from "@dclimate/tabular/reader";
-import { InvalidSelectionError, NoDataFoundError } from "../errors.js";
+import {
+  DatasetCorruptError,
+  InvalidSelectionError,
+  NoDataFoundError,
+} from "../errors.js";
 
 /**
  * Re-throw a station query failure as this library's own error type.
@@ -27,6 +32,13 @@ export const translateStationError = (cause: unknown): never => {
     throw cause.reason === "not-found"
       ? new NoDataFoundError(cause.message)
       : new InvalidSelectionError(cause.message);
+  }
+  // Corrupt data is not a bad question. Checked as its own branch rather than
+  // before the reader case for emphasis: tabular deliberately does not descend
+  // `DatasetIntegrityError` from `DatasetReaderError`, precisely so a boundary
+  // like this one cannot sweep it into "you asked wrong".
+  if (cause instanceof DatasetIntegrityError) {
+    throw new DatasetCorruptError(cause.message);
   }
   // Other reader failures are malformed requests too -- an unknown column, a
   // predicate against a column that is not comparable.

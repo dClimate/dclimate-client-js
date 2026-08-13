@@ -6,6 +6,7 @@ import {
 } from "@dclimate/tabular/reader";
 import { DatasetNotFoundError } from "../errors.js";
 import { translateStationError } from "./errors.js";
+import { wrapStationDataset } from "./wrap.js";
 
 /**
  * Station (point-observation) datasets, as opposed to the gridded Zarr datasets
@@ -94,8 +95,13 @@ export class StationsClient {
     // points at something else fails here rather than at query time. Translated
     // like any other reader failure: a caller catching `DClimateClientError`
     // should not have to also know `@dclimate/tabular`'s error hierarchy.
+    //
+    // The dataset is wrapped on the way out so that guarantee holds for the
+    // whole chain, not just this call: `select`, `where`, and `rows` raise
+    // tabular's errors too, and a caller has no reason to expect the boundary to
+    // stop at `open`.
     try {
-      return await StationDataset.open(source, root);
+      return wrapStationDataset(await StationDataset.open(source, root));
     } catch (cause) {
       return translateStationError(cause);
     }

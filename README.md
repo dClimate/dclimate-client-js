@@ -83,7 +83,7 @@ degrees, ISO timestamps, chained selections.
 const stations = await client.stations.load({ cid: "bafyr4i..." });
 
 // Every station, with position and coverage window.
-for (const s of stations.stations) {
+for (const s of await stations.listStations()) {
   console.log(s.stationId, s.latitude, s.longitude, s.start, s.end);
 }
 
@@ -111,8 +111,10 @@ Two things differ from `GeoTemporalDataset`, because the data model differs:
   down to fragment statistics, so most fragments are skipped without being read:
 
 ```typescript
-const hotDays = await stations
-  .nearest(29.98, -95.36)
+// `nearest` reads the station index to find the match, so it is async --
+// unlike the synchronous selections above, it has to be awaited before the
+// chain continues.
+const hotDays = await (await stations.nearest(29.98, -95.36))
   .timeRange({ start: "2025-01-01", end: "2025-12-31" })
   .where({ element: "TMAX", op: "gt", value: 350 }) // tenths of °C, so 35 °C
   .rows();
