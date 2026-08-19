@@ -149,6 +149,14 @@ function parseArgs(argv: string[]): Args {
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
           throw new Error("--near expects <lat,lon>, e.g. --near 40.78,-73.97");
         }
+        // Checked at parse time so a swapped lat/lon fails before anything is
+        // fetched. Tabular >= 0.9.1 rejects these too; this just fails faster
+        // and names the flag.
+        if (Math.abs(lat) > 90 || Math.abs(lon) > 180) {
+          throw new Error(
+            `--near ${lat},${lon} is not on the globe: latitude is within ±90, longitude within ±180 (did you swap lat and lon?)`
+          );
+        }
         args.near = [lat, lon];
         break;
       }
@@ -338,6 +346,23 @@ async function applySelection(
           "Dataset reports no entities, so an open-ended --from/--to cannot be widened."
         );
       }
+      // A one-sided bound outside that coverage would make the widened range
+      // inverted, and the library normalizes inverted ranges as typos rather
+      // than selecting nothing -- so `--from` after the last observation would
+      // quietly answer with rows from *before* it. The honest answer is that
+      // the request and the coverage do not overlap. (Unparseable dates fall
+      // through: NaN fails both comparisons, and `timeRange` names the typo.)
+      const window = `${day(new Date(earliest))} .. ${day(new Date(latest))}`;
+      if (args.from && !args.to && Date.parse(args.from) > latest) {
+        throw new Error(
+          `--from ${args.from} is after the selected entities' coverage ends (${window}); no data to return.`
+        );
+      }
+      if (args.to && !args.from && Date.parse(args.to) < earliest) {
+        throw new Error(
+          `--to ${args.to} is before the selected entities' coverage starts (${window}); no data to return.`
+        );
+      }
       if (!args.from) start = new Date(earliest);
       if (!args.to) end = new Date(latest);
     }
@@ -394,7 +419,17 @@ async function main(): Promise<void> {
   console.log(`\nQuery (wire units): ${JSON.stringify(selected.toQuery())}`);
 
   const plan = await selected.plan();
-  const bytes = plan.fragments.reduce((sum, f) => sum + f.byteLength, 0);
+  // Summed from the planned ranges, not `byteLength`: that is the whole Parquet
+  // fragment, where the reader fetches only the column chunks the query needs.
+  // Against a many-column dataset the difference is roughly the column-count
+  // ratio, so pricing by full fragments made --max-bytes refuse one-element
+  // queries whose actual transfer was far below the ceiling. Assumes a gateway
+  // that honours Range; one that ignores it sends whole fragments, which the
+  // reader itself then caps per response.
+  const bytes = plan.fragments.reduce(
+    (sum, f) => sum + f.ranges.reduce((total, range) => total + range.length, 0),
+    0
+  );
   const rows = plan.fragments.reduce((sum, f) => sum + f.rowCount, 0);
   console.log(
     `Plan: ${plan.fragments.length} fragment(s), ` +
