@@ -139,9 +139,14 @@ function parseArgs(argv: string[]): Args {
       case "--max-bytes": args.maxBytes = Number(value()); break;
       case "--near": {
         const parts = value().split(",");
+        // Empty components are rejected before conversion: `Number("")` is 0,
+        // so `--near ,-73.97` would otherwise silently query the equator.
+        if (parts.length !== 2 || parts.some((part) => part.trim() === "")) {
+          throw new Error("--near expects <lat,lon>, e.g. --near 40.78,-73.97");
+        }
         const lat = Number(parts[0]);
         const lon = Number(parts[1]);
-        if (parts.length !== 2 || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
           throw new Error("--near expects <lat,lon>, e.g. --near 40.78,-73.97");
         }
         args.near = [lat, lon];
@@ -368,26 +373,21 @@ async function main(): Promise<void> {
   // Resolved before any selection, because `--element` feeds `requireColumns`
   // inside `applySelection` as well as the projection below.
   //
-  // Costs one entity lookup rather than an index walk: an explicitly named entity
-  // is used when there is one, and otherwise `--near` resolves a real entity
-  // anyway. Only a bare query with no entity in sight falls back to listing, and
-  // that path was already walking the index to widen its time range.
-  // Kept beyond the block below so the footer can state the unit the dataset
-  // declares for whatever element ends up printed, rather than asserting one.
-  let referenceColumns: readonly EntityColumn[] = [];
+  // Resolved against the dataset's own vocabulary -- every column its schema
+  // defines -- rather than one station's `columnsFor` report. This used to pick
+  // a reference station (the first `--entity`, or the *unfiltered* nearest) and
+  // validate against what that one station had reported, which rejected
+  // elements the dataset could answer: the station nearest a point is routinely
+  // one that has never recorded TMAX, and `--near`'s own `requireColumns`
+  // search exists precisely to skip past it. The vocabulary also carries each
+  // column's stated unit, which the footer below reads. Costs nothing: it is
+  // read off the schema the load already fetched.
+  const vocabulary = dataset.columns();
   if (args.elements.length > 0) {
-    const reference =
-      args.entities[0] ??
-      (args.near
-        ? (await dataset.findNearestEntity(args.near[0], args.near[1])).entityId
-        : (await dataset.listEntities())[0]?.entityId);
-    if (reference !== undefined) {
-      referenceColumns = await dataset.columnsFor(reference);
-      args.elements = resolveElements(
-        args.elements,
-        referenceColumns.map((column) => column.name)
-      );
-    }
+    args.elements = resolveElements(
+      args.elements,
+      vocabulary.map((column) => column.name)
+    );
   }
 
   const selected = await applySelection(dataset, args);
@@ -460,7 +460,7 @@ async function main(): Promise<void> {
   // this line used to hardcode GHCND's tenths, which was simply false for NDBC,
   // where the same column type holds real floats in m/s and hPa.
   if (element !== undefined) {
-    const stated = referenceColumns.find(
+    const stated = vocabulary.find(
       (column) => column.name === element
     )?.units;
     console.log(

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DatasetIntegrityError,
   DatasetReaderError,
   EntitySelectionError,
 } from "@dclimate/tabular/reader";
@@ -7,6 +8,7 @@ import { DClimateClient } from "../src/index.js";
 import { EntitiesClient } from "../src/entities/entities-client.js";
 import { translateEntityError } from "../src/entities/errors.js";
 import {
+  DatasetCorruptError,
   DatasetNotFoundError,
   DClimateClientError,
   InvalidSelectionError,
@@ -115,6 +117,16 @@ describe("entity error translation", () => {
   it("maps other reader failures to InvalidSelectionError", () => {
     expect(() => translateEntityError(new DatasetReaderError("Unknown element: X")))
       .toThrow(InvalidSelectionError);
+  });
+
+  it("maps corrupt stored data to DatasetCorruptError, not a caller mistake", () => {
+    // Tabular >= 0.9 raises DatasetIntegrityError for read-path failures only
+    // the stored bytes can cause. Sweeping those into InvalidSelectionError
+    // would send the caller hunting for a mistake in a query they wrote
+    // correctly -- the misattribution the class split exists to prevent.
+    const cause = new DatasetIntegrityError("Unknown field id 99");
+    expect(() => translateEntityError(cause)).toThrow(DatasetCorruptError);
+    expect(() => translateEntityError(cause)).toThrow("Unknown field id 99");
   });
 
   it("re-throws an unrecognised error unchanged", () => {

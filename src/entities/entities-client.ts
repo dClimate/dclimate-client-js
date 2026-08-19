@@ -1,12 +1,10 @@
 import { CID } from "multiformats/cid";
-import {
-  GatewayRangeSource,
+import type {
   EntityDataset,
-  type NearestEntity,
+  NearestEntity,
+  TableField,
 } from "@dclimate/tabular/reader";
 import { DatasetNotFoundError } from "../errors.js";
-import { translateEntityError } from "./errors.js";
-import { wrapEntityDataset } from "./wrap.js";
 
 /**
  * Entity (point-observation) datasets, as opposed to the gridded Zarr datasets
@@ -36,6 +34,19 @@ export interface LoadEntitiesRequest {
   cid: string;
   /** Override the client's gateway for this dataset only. */
   gatewayUrl?: string;
+  /**
+   * Map each schema field to the column name queries and results use.
+   *
+   * A dataset's published column names are a property of its profile, not of
+   * the stored blocks: GHCND stores a field named `tmax` and publishes it as
+   * `TMAX`, NDBC preserves mixed case like `SwH`. The reader's default is the
+   * identity -- the schema's own field names -- so without the dataset's
+   * mapping, the published names are unreachable: `elements("TMAX")` is an
+   * unknown element even though every GHCND doc names it that way.
+   *
+   * For GHCND, pass `(field) => field.name.toUpperCase()`.
+   */
+  columnKey?: (field: TableField) => string;
 }
 
 export interface NearestEntityRequest extends LoadEntitiesRequest {
@@ -91,6 +102,19 @@ export class EntitiesClient {
       throw new DatasetNotFoundError(`Not a valid CID: ${request.cid}${detail}`);
     }
 
+    // Imported here, not at the top of the module: tabular's reader brings
+    // hyparquet and its compressors with it, and a static chain from the main
+    // client entry would make every consumer -- browser bundles included -- pay
+    // for entity support they may never touch. `client.entities` constructing
+    // lazily saves nothing if the modules loaded anyway. After the CID check,
+    // so a typo still fails instantly without loading the stack.
+    const [{ EntityDataset, GatewayRangeSource }, { translateEntityError }, { wrapEntityDataset }] =
+      await Promise.all([
+        import("@dclimate/tabular/reader"),
+        import("./errors.js"),
+        import("./wrap.js"),
+      ]);
+
     const source = new GatewayRangeSource({
       gatewayUrl: request.gatewayUrl ?? this.options.gatewayUrl,
       ...(this.options.fetch ? { fetch: this.options.fetch } : {}),
@@ -105,7 +129,11 @@ export class EntitiesClient {
     // tabular's errors too, and a caller has no reason to expect the boundary to
     // stop at `open`.
     try {
-      return wrapEntityDataset(await EntityDataset.open(source, root));
+      return wrapEntityDataset(
+        await EntityDataset.open(source, root, {
+          ...(request.columnKey ? { columnKey: request.columnKey } : {}),
+        })
+      );
     } catch (cause) {
       return translateEntityError(cause);
     }
@@ -124,15 +152,13 @@ export class EntitiesClient {
    * apart from a good match is how far away it is.
    */
   async nearest(request: NearestEntityRequest): Promise<NearestEntity> {
+    // No translation boundary of its own: `load` returns the dataset already
+    // wrapped, so `findNearestEntity`'s failures come back translated.
     const dataset = await this.load(request);
-    try {
-      return await dataset.findNearestEntity(request.latitude, request.longitude, {
-        ...(request.columns ? { requireColumns: request.columns } : {}),
-        ...(request.maxKm === undefined ? {} : { maxKm: request.maxKm }),
-        ...(request.within === undefined ? {} : { withinRange: request.within }),
-      });
-    } catch (cause) {
-      return translateEntityError(cause);
-    }
+    return dataset.findNearestEntity(request.latitude, request.longitude, {
+      ...(request.columns ? { requireColumns: request.columns } : {}),
+      ...(request.maxKm === undefined ? {} : { maxKm: request.maxKm }),
+      ...(request.within === undefined ? {} : { withinRange: request.within }),
+    });
   }
 }

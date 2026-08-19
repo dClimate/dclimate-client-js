@@ -49,7 +49,11 @@ export const translateEntityError = (cause: unknown): never => {
     throw new DatasetCorruptError(cause.message);
   }
   // Other reader failures are malformed requests too -- an unknown column, a
-  // predicate against a column that is not comparable.
+  // predicate against a column that is not comparable. Translating the whole
+  // class this way leans on tabular >= 0.9's contract that `DatasetReaderError`
+  // means exactly that: read-path failures only the stored bytes can cause (a
+  // fragment naming a field the schema lacks, a value contradicting its
+  // declared type) raise `DatasetIntegrityError` instead, and are caught above.
   if (cause instanceof DatasetReaderError || cause instanceof PredicateError) {
     throw new InvalidSelectionError(cause.message);
   }

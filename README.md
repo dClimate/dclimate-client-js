@@ -83,12 +83,22 @@ degrees, ISO timestamps, chained selections.
 in GHCND, a buoy in NDBC.
 
 ```typescript
-const entities = await client.entities.load({ cid: "bafyr4i..." });
+// `columnKey` maps schema field names to the column names queries use. It is a
+// property of the dataset's publishing profile, not of the stored blocks, so
+// the caller states it: GHCND stores `tmax` and publishes `TMAX`. Without it,
+// column names default to the schema's own (lowercase, for GHCND).
+const entities = await client.entities.load({
+  cid: "bafyr4i...",
+  columnKey: (field) => field.name.toUpperCase(), // GHCND's mapping
+});
 
 // Every entity, with position and coverage window.
 for (const e of await entities.listEntities()) {
   console.log(e.entityId, e.latitude, e.longitude, e.start, e.end);
 }
+
+// Every column the dataset defines, with its stated unit.
+console.log(entities.columns()); // [{ name: "TMAX", units: "degC_tenths" }, ...]
 
 // Entities within 50 km of a point, over one week.
 const records = await entities

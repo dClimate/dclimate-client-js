@@ -257,10 +257,10 @@
     uint8arrays "^5.1.0"
     zarrita "^0.5.4"
 
-"@dclimate/tabular@^0.8.0":
-  version "0.8.0"
-  resolved "https://registry.npmjs.org/@dclimate/tabular/-/tabular-0.8.0.tgz"
-  integrity sha512-pqIpTnDmnBUPp4pCj8fkY/xi13JyDuI5TfwfN/B2DL+yy7+d3OKpKiMKTHIq8Xckle+Z6H9Nxa/6uj8vrFjQZg==
+"@dclimate/tabular@^0.9.0":
+  version "0.9.0"
+  resolved "https://registry.npmjs.org/@dclimate/tabular/-/tabular-0.9.0.tgz"
+  integrity sha512-VFK2evuYI73kkkWtGilZLQTA5WbGJAS/k/hH+UmFmpj2OXSP+1DirJHVgd+Q1Uc/bMHn64HJATNc4Wrw1sousA==
   dependencies:
     "@dclimate/ipld-index" "^0.2.0"
     "@helia/unixfs" "8.0.3"

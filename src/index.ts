@@ -61,7 +61,6 @@ export {
 } from "./siren/index.js";
 export {
   EntitiesClient,
-  translateEntityError,
   type LoadEntitiesRequest,
   type NearestEntityRequest,
   type EntitiesClientOptions,
@@ -69,6 +68,7 @@ export {
   type NearestEntity,
   type EntityDataset,
   type EntityInfo,
+  type TableField,
   type TimeInput,
   type TimeRangeInput,
 } from "./entities/index.js";
