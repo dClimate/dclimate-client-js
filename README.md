@@ -73,22 +73,25 @@ const slice = await point.timeRange({
 console.log(await slice.toRecords("precipitation"));
 ```
 
-### Station data usage
+### Entity data usage
 
-Gridded Zarr datasets come from `loadDataset`. Point-observation **station**
-datasets (GHCND and friends) live under `client.stations`, and read the same way:
+Gridded Zarr datasets come from `loadDataset`. Point-observation **entity**
+datasets (GHCND and friends) live under `client.entities`, and read the same way:
 degrees, ISO timestamps, chained selections.
 
-```typescript
-const stations = await client.stations.load({ cid: "bafyr4i..." });
+"Entity" is the format's word for whatever a row belongs to — a weather station
+in GHCND, a buoy in NDBC.
 
-// Every station, with position and coverage window.
-for (const s of await stations.listStations()) {
-  console.log(s.stationId, s.latitude, s.longitude, s.start, s.end);
+```typescript
+const entities = await client.entities.load({ cid: "bafyr4i..." });
+
+// Every entity, with position and coverage window.
+for (const e of await entities.listEntities()) {
+  console.log(e.entityId, e.latitude, e.longitude, e.start, e.end);
 }
 
-// Stations within 50 km of a point, over one week.
-const records = await stations
+// Entities within 50 km of a point, over one week.
+const records = await entities
   .circle(40.75, -73.99, 50)
   .timeRange({ start: "2023-01-01", end: "2023-01-07" })
   .toRecords("TMAX");
@@ -97,7 +100,7 @@ const records = await stations
 Selections return new instances, so a partial selection can be branched:
 
 ```typescript
-const week = stations.timeRange({ start: "2023-01-01", end: "2023-01-07" });
+const week = entities.timeRange({ start: "2023-01-01", end: "2023-01-07" });
 const nyc = await week.select("USW00094728").rows();
 const lax = await week.select("USW00023174").rows();
 ```
@@ -106,15 +109,17 @@ Two things differ from `GeoTemporalDataset`, because the data model differs:
 
 - **`nearest(lat, lon, { maxKm })` instead of `point()`.** A grid always has a
   cell under any coordinate; stations are irregular, so the nearest one may be
-  far away. Pass `maxKm` to make that a hard bound rather than a surprise.
+  far away. Pass `maxKm` to make that a hard bound rather than a surprise. Use
+  `findNearestEntity(lat, lon)` when you need the distance itself — it returns
+  `{ entityId, km, latitude, longitude }` instead of a chainable dataset.
 - **`where(...)` has no gridded counterpart.** Row-level predicates are pushed
   down to fragment statistics, so most fragments are skipped without being read:
 
 ```typescript
-// `nearest` reads the station index to find the match, so it is async --
+// `nearest` reads the entity index to find the match, so it is async --
 // unlike the synchronous selections above, it has to be awaited before the
 // chain continues.
-const hotDays = await (await stations.nearest(29.98, -95.36))
+const hotDays = await (await entities.nearest(29.98, -95.36))
   .timeRange({ start: "2025-01-01", end: "2025-12-31" })
   .where({ element: "TMAX", op: "gt", value: 350 }) // tenths of °C, so 35 °C
   .rows();

@@ -1,19 +1,19 @@
 /**
- * Load and inspect a station dataset through `client.stations`.
+ * Load and inspect an entity dataset through `client.entities`.
  *
- * The station counterpart to `inspect-dataset.ts`: that one walks a gridded
+ * The entity counterpart to `inspect-dataset.ts`: that one walks a gridded
  * Zarr dataset, this one walks point observations. Both go through the same
- * client, which is the thing worth seeing -- station data is not a separate
+ * client, which is the thing worth seeing -- entity data is not a separate
  * SDK, just a second namespace.
  *
  * Usage:
- *   npx tsx scripts/inspect-stations.ts <cid>
- *   npx tsx scripts/inspect-stations.ts <cid> --station USW00094728 --element TMAX
- *   npx tsx scripts/inspect-stations.ts <cid> --near 40.78,-73.97 --from 2025-07-01 --to 2025-07-08
+ *   npx tsx scripts/inspect-entities.ts <cid>
+ *   npx tsx scripts/inspect-entities.ts <cid> --entity USW00094728 --element TMAX
+ *   npx tsx scripts/inspect-entities.ts <cid> --near 40.78,-73.97 --from 2025-07-01 --to 2025-07-08
  *
  * Options:
  *   --gateway <url>     IPFS HTTP gateway (default http://127.0.0.1:8080)
- *   --station <id>      Restrict to one station id (repeatable)
+ *   --entity <id>       Restrict to one entity id (repeatable)
  *   --near <lat,lon>    Use the nearest station that reports every --element
  *   --max-km <n>        Fail if the nearest such station is further than this
  *   --element <name>    Restrict to one element, e.g. TMAX, TMIN, PRCP (repeatable)
@@ -24,7 +24,7 @@
  *                       row is fetched regardless. Narrow the query to fetch less.
  *   --max-rows <n>      Refuse to fetch more than this many rows (0 for no limit)
  *   --max-bytes <n>     Refuse to fetch more than this many bytes (0 for no limit)
- *   --list              List every station first (walks the whole index)
+ *   --list              List every entity first (walks the whole index)
  *   --plan              Show what would be fetched, then stop
  *
  * Requires an IPFS gateway that can serve the dataset's blocks. A local Kubo
@@ -32,7 +32,11 @@
  */
 
 import { DClimateClient } from "../src/index.js";
-import type { StationDataset, StationInfo } from "@dclimate/tabular/reader";
+import type {
+  EntityColumn,
+  EntityDataset,
+  EntityInfo,
+} from "@dclimate/tabular/reader";
 
 const DEFAULT_GATEWAY = "http://127.0.0.1:8080";
 
@@ -51,7 +55,7 @@ const MAX_BYTES = 512 * 1024 * 1024;
 interface Args {
   cid: string;
   gateway: string;
-  stations: string[];
+  entities: string[];
   near: [number, number] | null;
   elements: string[];
   from: string | null;
@@ -65,18 +69,18 @@ interface Args {
 }
 
 const USAGE = `Usage:
-  npx tsx scripts/inspect-stations.ts <cid> [options]
+  npx tsx scripts/inspect-entities.ts <cid> [options]
 
 Options:
   --gateway <url>     IPFS HTTP gateway (default ${DEFAULT_GATEWAY})
-  --station <id>      Restrict to one station id (repeatable)
+  --entity <id>       Restrict to one entity id (repeatable)
   --near <lat,lon>    Use the nearest station that reports every --element
   --max-km <n>        Fail if the nearest such station is further than this
   --element <name>    Restrict to one element, e.g. TMAX (repeatable)
   --from <date>       ISO date, inclusive
   --to <date>         ISO date, inclusive
                       (passing only one widens the other to the selected
-                       stations' extent; walks the index unless --station
+                       entities' extent; walks the index unless --entity
                        or --near narrowed the selection first)
   --limit <n>         Rows to print (default 10; 0 prints all)
                       (printing only: every matching row is fetched either way)
@@ -84,14 +88,14 @@ Options:
                       (default ${MAX_ROWS.toLocaleString()}; 0 for no limit)
   --max-bytes <n>     Refuse to fetch more than this many bytes
                       (default ${(MAX_BYTES / 1024 / 1024).toFixed(0)} MiB; 0 for no limit)
-  --list              List every station first (walks the whole index)
+  --list              List every entity first (walks the whole index)
   --plan              Show what would be fetched, then stop`;
 
 function parseArgs(argv: string[]): Args {
   const args: Args = {
     cid: "",
     gateway: process.env.IPFS_GATEWAY_URL ?? DEFAULT_GATEWAY,
-    stations: [],
+    entities: [],
     near: null,
     elements: [],
     from: null,
@@ -119,8 +123,12 @@ function parseArgs(argv: string[]): Args {
 
     switch (arg) {
       case "--gateway": args.gateway = value(); break;
-      case "--station": args.stations.push(value()); break;
-      case "--element": args.elements.push(value().toUpperCase()); break;
+      case "--entity": args.entities.push(value()); break;
+      // Kept verbatim. Which casing is correct belongs to the dataset, not to
+      // this parser -- GHCND publishes `TMAX`, other feeds publish `tmax` -- so
+      // it is resolved against the real column list in `resolveElements` once
+      // the dataset is open.
+      case "--element": args.elements.push(value()); break;
       case "--from": args.from = value(); break;
       case "--to": args.to = value(); break;
       case "--limit": args.limit = Number(value()); break;
@@ -167,12 +175,12 @@ function parseArgs(argv: string[]): Args {
   if (args.maxKm !== null && !args.near) {
     throw new Error("--max-km only applies with --near");
   }
-  // Both name a station set, and honouring one means ignoring the other. Since
+  // Both name an entity set, and honouring one means ignoring the other. Since
   // the output does not restate which ids were queried, silently dropping
-  // --station would print a confident answer for a station nobody asked about.
-  if (args.near && args.stations.length > 0) {
+  // --entity would print a confident answer for an entity nobody asked about.
+  if (args.near && args.entities.length > 0) {
     throw new Error(
-      "--near and --station both choose stations; pass one or the other"
+      "--near and --entity both choose entities; pass one or the other"
     );
   }
   return args;
@@ -180,18 +188,76 @@ function parseArgs(argv: string[]): Args {
 
 const day = (date: Date): string => date.toISOString().slice(0, 10);
 
-function describeStation(station: StationInfo): string {
+function describeEntity(entity: EntityInfo): string {
   const where =
-    station.latitude === null || station.longitude === null
+    entity.latitude === null || entity.longitude === null
       ? "no position"
-      : `${station.latitude.toFixed(4)}, ${station.longitude.toFixed(4)}`;
-  return `${station.stationId}  ${where}  ${day(station.start)} .. ${day(station.end)}`;
+      : `${entity.latitude.toFixed(4)}, ${entity.longitude.toFixed(4)}`;
+  return `${entity.entityId}  ${where}  ${day(entity.start)} .. ${day(entity.end)}`;
+}
+
+/**
+ * Match each `--element` to a column the dataset actually publishes, ignoring
+ * case when — and only when — that is unambiguous.
+ *
+ * Column casing belongs to the publisher, and publishers disagree: GHCND emits
+ * `TMAX`, other feeds emit `tmax`. Forcing either one here made the flag unusable
+ * against half of them, so the name is resolved against the real column list
+ * instead of guessed at parse time.
+ *
+ * An exact match always wins outright, and a case-insensitive match is accepted
+ * only if exactly one column matches. That second rule is not pedantry: NDBC
+ * headers carry `MM` (month) and `mm` (minute) as distinct columns in the same
+ * table, so a blanket casefold would silently resolve to whichever came first
+ * and return the wrong data. Ambiguity is reported rather than guessed.
+ *
+ * Done here rather than in `@dclimate/tabular` deliberately — the reader's exact
+ * matching is what makes `MM`/`mm` addressable at all, and this convenience
+ * belongs to a human typing at a terminal, not to the library's query semantics.
+ */
+/**
+ * Render a station's columns with the units the dataset states.
+ *
+ * A column that states no unit prints bare rather than as `name ()` -- the
+ * dataset genuinely does not say, and inventing a guess here is what the old
+ * hardcoded "integers in tenths" line did wrong.
+ */
+function formatColumns(columns: readonly EntityColumn[]): string {
+  return columns
+    .map((column) =>
+      column.units === null ? column.name : `${column.name} (${column.units})`
+    )
+    .join(", ");
+}
+
+function resolveElements(
+  requested: readonly string[],
+  available: readonly string[]
+): string[] {
+  return requested.map((element) => {
+    if (available.includes(element)) return element;
+
+    const folded = available.filter(
+      (column) => column.toLowerCase() === element.toLowerCase()
+    );
+    if (folded.length === 1) return folded[0]!;
+    if (folded.length > 1) {
+      throw new Error(
+        `--element ${element} is ambiguous: this dataset publishes ` +
+          `${folded.join(" and ")}, which differ only by case. ` +
+          `Pass the exact name.`
+      );
+    }
+    throw new Error(
+      `Unknown element: ${element}. This dataset publishes: ${available.join(", ")}`
+    );
+  });
 }
 
 async function applySelection(
-  dataset: StationDataset,
+  dataset: EntityDataset,
   args: Args
-): Promise<StationDataset> {
+): Promise<EntityDataset> {
   let selected = dataset;
 
   if (args.near) {
@@ -207,28 +273,28 @@ async function applySelection(
       args.elements.length > 0 && (args.from || args.to)
         ? { start: args.from ?? "0001-01-01", end: args.to ?? "9999-12-31" }
         : null;
-    const found = await selected.findNearestStation(lat, lon, {
+    const found = await selected.findNearestEntity(lat, lon, {
       // Asking for an element means asking for a station that reports it. The
       // nearest station that has never recorded TMAX is not a TMAX answer.
       ...(args.elements.length > 0 ? { requireColumns: args.elements } : {}),
       ...(args.maxKm === null ? {} : { maxKm: args.maxKm }),
       ...(within === null ? {} : { withinRange: within }),
     });
-    selected = selected.select(found.stationId);
-    const columns = await dataset.columnsFor(found.stationId);
+    selected = selected.select(found.entityId);
+    const columns = await dataset.columnsFor(found.entityId);
     console.log(
-      `\nNearest station to ${lat}, ${lon}: ${found.stationId} (${found.km.toFixed(1)} km)`
+      `\nNearest station to ${lat}, ${lon}: ${found.entityId} (${found.km.toFixed(1)} km)`
     );
     console.log(
-      `  reports: ${columns.join(", ")}${within === null ? "" : "  (ever)"}`
+      `  reports: ${formatColumns(columns)}${within === null ? "" : "  (ever)"}`
     );
     if (found.km > 500) {
       console.log(
         `  NOTE: ${found.km.toFixed(0)} km away -- this dataset may not cover that region.`
       );
     }
-  } else if (args.stations.length > 0) {
-    selected = selected.select(...args.stations);
+  } else if (args.entities.length > 0) {
+    selected = selected.select(...args.entities);
   }
 
   if (args.elements.length > 0) selected = selected.elements(...args.elements);
@@ -240,31 +306,31 @@ async function applySelection(
     let start: Date | string = args.from ?? "";
     let end: Date | string = args.to ?? "";
     if (!args.from || !args.to) {
-      // Scoped to whatever --station/--near already picked, for both reasons:
-      // widening from every station would stretch the range to one no selected
-      // station covers -- a station retired in 1987 pulling `start` back decades
+      // Scoped to whatever --entity/--near already picked, for both reasons:
+      // widening from every entity would stretch the range to one no selected
+      // entity covers -- a station retired in 1987 pulling `start` back decades
       // before the station actually queried -- and `infoFor` resolves each named
-      // station with a single lookup instead of the index walk `listStations()`
+      // entity with a single lookup instead of the index walk `listEntities()`
       // costs. Only an unfiltered query still pays for the walk, which it must,
-      // since it really is asking about every station.
-      const chosen = selected.toQuery().stations ?? [];
+      // since it really is asking about every entity.
+      const chosen = selected.toQuery().entities ?? [];
       const covered =
         chosen.length === 0
-          ? await selected.listStations()
+          ? await selected.listEntities()
           : await Promise.all(
-              chosen.map((stationId) => selected.infoFor(stationId))
+              chosen.map((entityId) => selected.infoFor(entityId))
             );
       // Folded rather than spread into Math.min/Math.max: at GHCND's station
       // count the spread exceeds V8's argument limit and throws.
       let earliest = Infinity;
       let latest = -Infinity;
-      for (const station of covered) {
-        earliest = Math.min(earliest, station.start.getTime());
-        latest = Math.max(latest, station.end.getTime());
+      for (const entity of covered) {
+        earliest = Math.min(earliest, entity.start.getTime());
+        latest = Math.max(latest, entity.end.getTime());
       }
       if (!Number.isFinite(earliest) || !Number.isFinite(latest)) {
         throw new Error(
-          "Dataset reports no stations, so an open-ended --from/--to cannot be widened."
+          "Dataset reports no entities, so an open-ended --from/--to cannot be widened."
         );
       }
       if (!args.from) start = new Date(earliest);
@@ -286,17 +352,42 @@ async function main(): Promise<void> {
   const args = parseArgs(argv);
   const client = new DClimateClient({ gatewayUrl: args.gateway, stacServerUrl: null });
 
-  console.log(`Loading station dataset ${args.cid}`);
+  console.log(`Loading entity dataset ${args.cid}`);
   console.log(`Gateway: ${args.gateway}\n`);
 
-  const dataset = await client.stations.load({ cid: args.cid });
+  const dataset = await client.entities.load({ cid: args.cid });
 
-  // Opt-in, because listing walks the whole station index -- a block per station,
+  // Opt-in, because listing walks the whole entity index -- a block per entity,
   // ~136k reads on GHCND -- and every other path here needs at most a few of them.
   if (args.list) {
-    const stations = await dataset.listStations();
-    console.log(`Stations (${stations.length}):`);
-    for (const station of stations) console.log(`  ${describeStation(station)}`);
+    const entities = await dataset.listEntities();
+    console.log(`Entities (${entities.length}):`);
+    for (const entity of entities) console.log(`  ${describeEntity(entity)}`);
+  }
+
+  // Resolved before any selection, because `--element` feeds `requireColumns`
+  // inside `applySelection` as well as the projection below.
+  //
+  // Costs one entity lookup rather than an index walk: an explicitly named entity
+  // is used when there is one, and otherwise `--near` resolves a real entity
+  // anyway. Only a bare query with no entity in sight falls back to listing, and
+  // that path was already walking the index to widen its time range.
+  // Kept beyond the block below so the footer can state the unit the dataset
+  // declares for whatever element ends up printed, rather than asserting one.
+  let referenceColumns: readonly EntityColumn[] = [];
+  if (args.elements.length > 0) {
+    const reference =
+      args.entities[0] ??
+      (args.near
+        ? (await dataset.findNearestEntity(args.near[0], args.near[1])).entityId
+        : (await dataset.listEntities())[0]?.entityId);
+    if (reference !== undefined) {
+      referenceColumns = await dataset.columnsFor(reference);
+      args.elements = resolveElements(
+        args.elements,
+        referenceColumns.map((column) => column.name)
+      );
+    }
   }
 
   const selected = await applySelection(dataset, args);
@@ -307,7 +398,7 @@ async function main(): Promise<void> {
   const rows = plan.fragments.reduce((sum, f) => sum + f.rowCount, 0);
   console.log(
     `Plan: ${plan.fragments.length} fragment(s), ` +
-      `${plan.stations.length} station(s), ` +
+      `${plan.entities.length} entity(s), ` +
       `${rows} row(s), ${(bytes / 1024).toFixed(1)} KiB`
   );
   // The number that shows predicate pushdown doing something: fragments ruled
@@ -339,7 +430,7 @@ async function main(): Promise<void> {
     throw new Error(
       `This query reads ${measured}, over the ${ceiling} this script will fetch.\n` +
         `  '--limit' only trims what is printed, so it cannot make this smaller.\n` +
-        `  Narrow it instead: --station or --near picks one station, --from/--to\n` +
+        `  Narrow it instead: --entity or --near picks one station, --from/--to\n` +
         `  a date range, --element one variable. Use --plan to price a query\n` +
         `  without running it, or --max-rows / --max-bytes to raise the ceiling.`
     );
@@ -358,16 +449,25 @@ async function main(): Promise<void> {
       element === undefined
         ? JSON.stringify(record.values)
         : String(record.value ?? "—");
-    console.log(`  ${day(record.time as Date)}  ${record.stationId}  ${value}`);
+    console.log(`  ${day(record.time as Date)}  ${record.entityId}  ${value}`);
   }
   if (shown.length < records.length) {
     console.log(`  ... ${records.length - shown.length} more (--limit 0 for all)`);
   }
 
-  // Stored in NOAA's own scaling rather than converted, so the archive's exact
-  // integers survive. Saying so beats letting a reader assume whole °C.
-  if (element) {
-    console.log(`\nValues are integers in tenths (TMAX 317 = 31.7 °C).`);
+  // Stored in the source's own scaling rather than converted, so its exact
+  // values survive. Read the unit off the dataset rather than asserting one:
+  // this line used to hardcode GHCND's tenths, which was simply false for NDBC,
+  // where the same column type holds real floats in m/s and hPa.
+  if (element !== undefined) {
+    const stated = referenceColumns.find(
+      (column) => column.name === element
+    )?.units;
+    console.log(
+      stated === undefined || stated === null
+        ? `\nValues are stored exactly as the source published them; this dataset states no unit for ${element}.`
+        : `\nValues are in ${stated}, stored exactly as the source published them.`
+    );
   }
 }
 

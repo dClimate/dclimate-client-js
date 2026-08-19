@@ -60,15 +60,15 @@ export {
   type SirenRegionsResponse,
 } from "./siren/index.js";
 export {
-  StationsClient,
-  translateStationError,
-  type LoadStationsRequest,
-  type NearestStationRequest,
-  type StationsClientOptions,
+  EntitiesClient,
+  translateEntityError,
+  type LoadEntitiesRequest,
+  type NearestEntityRequest,
+  type EntitiesClientOptions,
   type NearestOptions,
-  type NearestStation,
-  type StationDataset,
-  type StationInfo,
+  type NearestEntity,
+  type EntityDataset,
+  type EntityInfo,
   type TimeInput,
   type TimeRangeInput,
-} from "./stations/index.js";
+} from "./entities/index.js";

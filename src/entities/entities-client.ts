@@ -1,40 +1,44 @@
 import { CID } from "multiformats/cid";
 import {
   GatewayRangeSource,
-  StationDataset,
-  type NearestStation,
+  EntityDataset,
+  type NearestEntity,
 } from "@dclimate/tabular/reader";
 import { DatasetNotFoundError } from "../errors.js";
-import { translateStationError } from "./errors.js";
-import { wrapStationDataset } from "./wrap.js";
+import { translateEntityError } from "./errors.js";
+import { wrapEntityDataset } from "./wrap.js";
 
 /**
- * Station (point-observation) datasets, as opposed to the gridded Zarr datasets
+ * Entity (point-observation) datasets, as opposed to the gridded Zarr datasets
  * `loadDataset` serves.
  *
- * The two are different enough underneath -- irregular stations with per-station
+ * "Entity" is tabular's word for the thing a row belongs to -- a weather station
+ * in GHCND, a buoy in NDBC -- and this namespace follows it rather than keeping
+ * an older `station` vocabulary the layer beneath no longer uses.
+ *
+ * The two are different enough underneath -- irregular entities with per-entity
  * time coverage, versus a regular lat/lon/time grid -- that sharing one loader
  * would help nobody. What they do share is how a caller wants to *ask*: degrees,
- * ISO timestamps, chained selections. `StationDataset` provides that surface, so
+ * ISO timestamps, chained selections. `EntityDataset` provides that surface, so
  * this namespace stays thin: resolve a root, hand back the dataset.
  *
- * Resolution is by CID only for now. There is no STAC equivalent for station
+ * Resolution is by CID only for now. There is no STAC equivalent for entity
  * data yet; when there is, `load` grows a `{ collection, dataset }` form
  * alongside the CID and the rest of this file is unaffected.
  */
-export interface StationsClientOptions {
+export interface EntitiesClientOptions {
   gatewayUrl: string;
   fetch?: typeof globalThis.fetch;
 }
 
-export interface LoadStationsRequest {
-  /** Root CID of a published station dataset. */
+export interface LoadEntitiesRequest {
+  /** Root CID of a published entity dataset. */
   cid: string;
   /** Override the client's gateway for this dataset only. */
   gatewayUrl?: string;
 }
 
-export interface NearestStationRequest extends LoadStationsRequest {
+export interface NearestEntityRequest extends LoadEntitiesRequest {
   latitude: number;
   longitude: number;
   /**
@@ -63,19 +67,19 @@ export interface NearestStationRequest extends LoadStationsRequest {
   within?: { start: Date | string | number; end: Date | string | number };
 }
 
-export class StationsClient {
-  constructor(private readonly options: StationsClientOptions) {}
+export class EntitiesClient {
+  constructor(private readonly options: EntitiesClientOptions) {}
 
   /**
-   * Open a station dataset by root CID.
+   * Open an entity dataset by root CID.
    *
    * Reads go through the IPFS HTTP gateway, so this needs no local daemon and
    * works unchanged in a browser.
    */
-  async load(request: LoadStationsRequest): Promise<StationDataset> {
+  async load(request: LoadEntitiesRequest): Promise<EntityDataset> {
     if (!request.cid) {
       throw new DatasetNotFoundError(
-        "A station dataset CID is required. Catalog resolution is not available yet."
+        "An entity dataset CID is required. Catalog resolution is not available yet."
       );
     }
 
@@ -101,34 +105,34 @@ export class StationsClient {
     // tabular's errors too, and a caller has no reason to expect the boundary to
     // stop at `open`.
     try {
-      return wrapStationDataset(await StationDataset.open(source, root));
+      return wrapEntityDataset(await EntityDataset.open(source, root));
     } catch (cause) {
-      return translateStationError(cause);
+      return translateEntityError(cause);
     }
   }
 
   /**
-   * The station nearest a point that actually has the data you asked for.
+   * The entity nearest a point that actually has the data you asked for.
    *
-   * Resolves the dataset and the station in one call, because "which station
-   * should I use for this location" is the question most callers open a station
+   * Resolves the dataset and the entity in one call, because "which station
+   * should I use for this location" is the question most callers open an entity
    * dataset to ask, and answering it through `load` means knowing that `nearest`
    * needs `columns` to avoid picking a station full of nulls.
    *
-   * Returns the distance alongside the station: a dataset with no coverage near
-   * the queried point still has a nearest station, and the only way to tell that
+   * Returns the distance alongside the entity: a dataset with no coverage near
+   * the queried point still has a nearest entity, and the only way to tell that
    * apart from a good match is how far away it is.
    */
-  async nearest(request: NearestStationRequest): Promise<NearestStation> {
+  async nearest(request: NearestEntityRequest): Promise<NearestEntity> {
     const dataset = await this.load(request);
     try {
-      return await dataset.findNearestStation(request.latitude, request.longitude, {
+      return await dataset.findNearestEntity(request.latitude, request.longitude, {
         ...(request.columns ? { requireColumns: request.columns } : {}),
         ...(request.maxKm === undefined ? {} : { maxKm: request.maxKm }),
         ...(request.within === undefined ? {} : { withinRange: request.within }),
       });
     } catch (cause) {
-      return translateStationError(cause);
+      return translateEntityError(cause);
     }
   }
 }

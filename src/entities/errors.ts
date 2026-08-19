@@ -4,7 +4,7 @@ import {
   DclimateTabularError,
   PredicateError,
   RangeSourceError,
-  StationSelectionError,
+  EntitySelectionError,
 } from "@dclimate/tabular/reader";
 import {
   DatasetCorruptError,
@@ -13,12 +13,12 @@ import {
 } from "../errors.js";
 
 /**
- * Re-throw a station query failure as this library's own error type.
+ * Re-throw an entity query failure as this library's own error type.
  *
- * Station queries are answered by `@dclimate/tabular`, whose errors descend from
+ * Entity queries are answered by `@dclimate/tabular`, whose errors descend from
  * its own base class rather than `DClimateClientError`. A caller writing one
  * `catch (error) { if (error instanceof DClimateClientError) ... }` around the
- * client would therefore miss every station failure -- so the boundary translates
+ * client would therefore miss every entity failure -- so the boundary translates
  * once, here, rather than each method wrapping its own body.
  *
  * The mapping follows the distinction the rest of this library draws, by who has
@@ -35,8 +35,8 @@ import {
  * The original message is preserved verbatim: it is the only part that names the
  * station, column, or distance that actually failed.
  */
-export const translateStationError = (cause: unknown): never => {
-  if (cause instanceof StationSelectionError) {
+export const translateEntityError = (cause: unknown): never => {
+  if (cause instanceof EntitySelectionError) {
     throw cause.reason === "not-found"
       ? new NoDataFoundError(cause.message)
       : new InvalidSelectionError(cause.message);
