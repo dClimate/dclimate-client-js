@@ -130,4 +130,33 @@ describe("entity columnKey end to end", () => {
     const records = await dataset.select("USW00094728").toRecords("tmax");
     expect(records.map((record) => record.value)).toEqual([250, 251, 252]);
   });
+
+  it("rejects out-of-range coordinates as an invalid selection", async () => {
+    // The validation itself lives in tabular >= 0.9.1 (`findNearestEntity`
+    // bounds-checks; the geo filter paths always did) -- the client deliberately
+    // delegates query validation and translates at the boundary rather than
+    // duplicating checks. This pins that contract from the caller's side: a
+    // latitude of 100 must surface as this library's InvalidSelectionError, not
+    // as a plausible-looking station for a point that does not exist.
+    const { store, root } = await publish();
+    const entities = new EntitiesClient({
+      gatewayUrl: "http://gateway.test",
+      fetch: gatewayFetch(store),
+    });
+
+    await expect(
+      entities.nearest({ cid: root, latitude: 100, longitude: 0 })
+    ).rejects.toThrow(InvalidSelectionError);
+    await expect(
+      entities.nearest({ cid: root, latitude: 40.78, longitude: 250 })
+    ).rejects.toThrow(InvalidSelectionError);
+
+    // In range still resolves -- the fixture's one station, with its distance.
+    const nearest = await entities.nearest({
+      cid: root,
+      latitude: 40.78,
+      longitude: -73.97,
+    });
+    expect(nearest.entityId).toBe("USW00094728");
+  });
 });
