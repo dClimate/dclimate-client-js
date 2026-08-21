@@ -68,6 +68,7 @@ export {
   type NearestEntity,
   type EntityDataset,
   type EntityInfo,
+  type DataGap,
   type TableField,
   type TimeInput,
   type TimeRangeInput,

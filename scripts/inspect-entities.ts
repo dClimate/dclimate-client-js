@@ -206,7 +206,17 @@ function describeEntity(entity: EntityInfo): string {
     entity.latitude === null || entity.longitude === null
       ? "no position"
       : `${entity.latitude.toFixed(4)}, ${entity.longitude.toFixed(4)}`;
-  return `${entity.entityId}  ${where}  ${day(entity.start)} .. ${day(entity.end)}`;
+  // `start .. end` is only the outer envelope, so a station with a hole in the
+  // middle of it prints exactly like one with none. Flagged here because `--list`
+  // is how a whole dataset gets surveyed, and reading a complete-looking window
+  // off a station that has a declared gap is the misreading this field exists to
+  // prevent. Counted rather than enumerated -- the ranges belong on the query
+  // that overlaps them, which `plan` already prints.
+  const gaps =
+    entity.gaps.length === 0
+      ? ""
+      : `  ! ${entity.gaps.length} gap(s)`;
+  return `${entity.entityId}  ${where}  ${day(entity.start)} .. ${day(entity.end)}${gaps}`;
 }
 
 /**
@@ -439,6 +449,31 @@ async function main(): Promise<void> {
   // The number that shows predicate pushdown doing something: fragments ruled
   // out by column statistics are never fetched at all.
   console.log(`      ${plan.stats.fragmentsPruned} fragment(s) pruned by statistics`);
+
+  // Windows the dataset states it has no data for, as distinct from windows
+  // where nothing happened. Printed loudly and before the rows, because the
+  // failure this guards against is someone reading a plausible-looking result
+  // and never learning that part of the range was never fetched. Only gaps
+  // overlapping the requested window are reported; the reader does that
+  // filtering, so a 1996 hole stays quiet on a 2024 query.
+  if (plan.gaps.length > 0) {
+    const total = plan.gaps.reduce((sum, entry) => sum + entry.gaps.length, 0);
+    console.log(
+      `      ! ${total} known gap(s) across ${plan.gaps.length} entity(s) ` +
+        `overlap this range -- the rows below are incomplete:`
+    );
+    for (const { entityId, gaps } of plan.gaps.slice(0, 5)) {
+      for (const gap of gaps) {
+        console.log(
+          `        ${entityId}  ${day(new Date(gap.beginUs / 1000))} .. ` +
+            `${day(new Date(gap.endUs / 1000))}  (${gap.reason})`
+        );
+      }
+    }
+    if (plan.gaps.length > 5) {
+      console.log(`        ... and ${plan.gaps.length - 5} more entity(s)`);
+    }
+  }
 
   if (args.plan) return;
 

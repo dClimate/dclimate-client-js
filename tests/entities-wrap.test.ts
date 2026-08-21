@@ -277,6 +277,42 @@ describe("translateEntityError classification", () => {
     expect(() => translateEntityError(failure)).not.toThrow(DatasetCorruptError);
   });
 
+  it("passes gap data through the proxy untouched", async () => {
+    // `gapsFor` and the `gaps` on every info row are the surface that tells a
+    // caller a window is *unknown* rather than empty. They resolve to plain
+    // arrays, so the proxy's `instanceof EntityDataset` check must let them by
+    // rather than treating them as a chainable to re-wrap -- the same path
+    // `columnsFor` takes, and a method the wrapper was never told about.
+    const gaps = [
+      { beginUs: 830_390_400_000_000, endUs: 847_065_599_999_999, reason: "awdb: HTTP 500" },
+    ];
+    const dataset = wrapEntityDataset(
+      fake({
+        gapsFor: () => Promise.resolve(gaps),
+        infoFor: () => Promise.resolve({ entityId: "2001:NE:SCAN", gaps }),
+      })
+    );
+
+    await expect(dataset.gapsFor("2001:NE:SCAN")).resolves.toBe(gaps);
+    await expect(dataset.infoFor("2001:NE:SCAN")).resolves.toEqual({
+      entityId: "2001:NE:SCAN",
+      gaps,
+    });
+  });
+
+  it("translates a rejection from gapsFor like any other terminal", async () => {
+    // An unknown entity id is a caller mistake, and must arrive as this
+    // library's error rather than tabular's -- the whole point of the wrapper.
+    const dataset = wrapEntityDataset(
+      fake({
+        gapsFor: () => Promise.reject(new EntitySelectionError("no such entity", "not-found")),
+      })
+    );
+
+    await expect(dataset.gapsFor("NOPE")).rejects.toThrow(NoDataFoundError);
+    await expect(dataset.gapsFor("NOPE")).rejects.toThrow(DClimateClientError);
+  });
+
   it("still rethrows errors that are not tabular's at all", () => {
     // The base-class branch must not become a catch-all: a TypeError from a bug
     // in this client is not a statement about the dataset.
