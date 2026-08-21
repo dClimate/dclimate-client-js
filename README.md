@@ -73,6 +73,103 @@ const slice = await point.timeRange({
 console.log(await slice.toRecords("precipitation"));
 ```
 
+### Entity data usage
+
+Gridded Zarr datasets come from `loadDataset`. Point-observation **entity**
+datasets (GHCND and friends) live under `client.entities`, and read the same way:
+degrees, ISO timestamps, chained selections.
+
+"Entity" is the format's word for whatever a row belongs to — a weather station
+in GHCND, a buoy in NDBC.
+
+```typescript
+// `columnKey` maps schema field names to the column names queries use. It is a
+// property of the dataset's publishing profile, not of the stored blocks, so
+// the caller states it: GHCND stores `tmax` and publishes `TMAX`. Without it,
+// column names default to the schema's own (lowercase, for GHCND).
+const entities = await client.entities.load({
+  cid: "bafyr4i...",
+  columnKey: (field) => field.name.toUpperCase(), // GHCND's mapping
+});
+
+// Every entity, with position and coverage window.
+for (const e of await entities.listEntities()) {
+  console.log(e.entityId, e.latitude, e.longitude, e.start, e.end);
+}
+
+// Windows the dataset states it does *not* know, as distinct from windows where
+// nothing happened. `[start, end]` is only an outer envelope: a station can go
+// dark in the middle of it, and without this a missing row and an unfetched one
+// look identical. Carried on every info row at no extra cost.
+for (const gap of (await entities.infoFor("USW00094728")).gaps) {
+  console.log(gap.beginUs, gap.endUs, gap.reason); // e.g. "awdb: HTTP 500"
+}
+
+// Every column the dataset defines, with its stated unit.
+console.log(entities.columns()); // [{ name: "TMAX", units: "degC_tenths" }, ...]
+
+// Entities within 50 km of a point, over one week.
+const records = await entities
+  .circle(40.75, -73.99, 50)
+  .timeRange({ start: "2023-01-01", end: "2023-01-07" })
+  .toRecords("TMAX");
+```
+
+Selections return new instances, so a partial selection can be branched:
+
+```typescript
+const week = entities.timeRange({ start: "2023-01-01", end: "2023-01-07" });
+const nyc = await week.select("USW00094728").rows();
+const lax = await week.select("USW00023174").rows();
+```
+
+Two things differ from `GeoTemporalDataset`, because the data model differs:
+
+- **`nearest(lat, lon, { maxKm })` instead of `point()`.** A grid always has a
+  cell under any coordinate; stations are irregular, so the nearest one may be
+  far away. Pass `maxKm` to make that a hard bound rather than a surprise. Use
+  `findNearestEntity(lat, lon)` when you need the distance itself — it returns
+  `{ entityId, km, latitude, longitude }` instead of a chainable dataset.
+- **`where(...)` has no gridded counterpart.** Row-level predicates are pushed
+  down to fragment statistics, so most fragments are skipped without being read:
+
+```typescript
+// `nearest` reads the entity index to find the match, so it is async --
+// unlike the synchronous selections above, it has to be awaited before the
+// chain continues.
+const hotDays = await (await entities.nearest(29.98, -95.36))
+  .timeRange({ start: "2025-01-01", end: "2025-12-31" })
+  .where({ element: "TMAX", op: "gt", value: 350 }) // tenths of °C, so 35 °C
+  .rows();
+```
+
+A third difference is worth stating on its own, because it changes how a result
+should be read:
+
+- **An empty result may mean "unknown", not "nothing happened".** `plan()`
+  reports the known gaps overlapping the range you asked for, so a query that
+  lands in a hole says so instead of returning a plausible, silent zero rows.
+  Only overlapping gaps are listed — asking about 2024 stays quiet about a hole
+  in 1996.
+
+```typescript
+const range = entities
+  .select("2001:NE:SCAN")
+  .timeRange({ start: "1996-06-01", end: "1996-07-01" });
+
+const { gaps } = await range.plan();
+for (const { entityId, gaps: windows } of gaps) {
+  for (const g of windows) {
+    console.warn(`${entityId}: no data for ${g.beginUs}..${g.endUs} (${g.reason})`);
+  }
+}
+const rows = await range.rows(); // may be empty *because* of the gap above
+```
+
+Reads go over the IPFS HTTP gateway, so no local daemon is required and the same
+code runs in a browser. Resolution is by CID for now; STAC catalog support will
+follow.
+
 ### Dataset version history
 
 For datasets that advertise version history in STAC, the client follows the

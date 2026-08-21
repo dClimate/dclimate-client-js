@@ -39,6 +39,7 @@ import {
   DEFAULT_STAC_SERVER_URL,
 } from "./stac/stac-server.js";
 import { SirenClient } from "./siren/siren-client.js";
+import { EntitiesClient } from "./entities/entities-client.js";
 import {
   getExactVersionFromUrl,
   listVersionsFromUrl,
@@ -112,6 +113,7 @@ export class DClimateClient {
   private stacCatalogTimestamp?: number;
   private stacCacheTtl: number = 3600000; // 1 hour
   private sirenClient?: SirenClient;
+  private entitiesClient?: EntitiesClient;
 
   constructor(options: ClientOptions = {}) {
     this.gatewayUrl = options.gatewayUrl ?? DEFAULT_IPFS_GATEWAY;
@@ -258,6 +260,21 @@ export class DClimateClient {
       );
     }
     return this.sirenClient;
+  }
+
+  /**
+   * Access entity (point-observation) datasets -- weather stations, buoys:
+   *   `client.entities.load({ cid })`
+   *
+   * Unlike `client.siren`, this needs no configuration -- it reads over the
+   * client's own IPFS gateway -- so it is constructed on first use rather than
+   * requiring an option and throwing when absent.
+   */
+  get entities(): EntitiesClient {
+    if (!this.entitiesClient) {
+      this.entitiesClient = new EntitiesClient({ gatewayUrl: this.gatewayUrl });
+    }
+    return this.entitiesClient;
   }
 
   async loadDataset({

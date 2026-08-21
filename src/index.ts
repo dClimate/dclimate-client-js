@@ -59,3 +59,17 @@ export {
   type SirenRegion,
   type SirenRegionsResponse,
 } from "./siren/index.js";
+export {
+  EntitiesClient,
+  type LoadEntitiesRequest,
+  type NearestEntityRequest,
+  type EntitiesClientOptions,
+  type NearestOptions,
+  type NearestEntity,
+  type EntityDataset,
+  type EntityInfo,
+  type DataGap,
+  type TableField,
+  type TimeInput,
+  type TimeRangeInput,
+} from "./entities/index.js";

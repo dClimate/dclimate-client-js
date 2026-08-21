@@ -1,8 +1,11 @@
 {
   "name": "@dclimate/dclimate-client-js",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "JavaScript client for dClimate datasets using jaxray and IPFS stores",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "main": "./dist/node/index.js",
   "module": "./dist/browser/index.js",
   "types": "./dist/node/index.d.ts",
@@ -31,7 +34,8 @@
     "test:ci": "vitest run",
     "test:coverage": "vitest run --coverage",
     "prepare": "npm run build",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "inspect:entities": "tsx scripts/inspect-entities.ts"
   },
   "keywords": [
     "dclimate",
@@ -51,13 +55,16 @@
   },
   "homepage": "https://github.com/dClimate/dclimate-client-js#readme",
   "dependencies": {
-    "@dclimate/jaxray": "^0.7.0",
-    "@opentelemetry/api": "^1.9.1"
+    "@dclimate/jaxray": "^0.7.2",
+    "@dclimate/tabular": "^0.10.0",
+    "@opentelemetry/api": "^1.9.1",
+    "multiformats": "^14.0.4"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
     "eslint": "10.4.1",
     "globals": "17.6.0",
+    "tsx": "^4.23.12",
     "typescript": "^5.4.0",
     "typescript-eslint": "8.61.0",
     "vitest": "^4.1.0"
