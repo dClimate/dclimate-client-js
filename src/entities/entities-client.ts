@@ -130,7 +130,15 @@ export class EntitiesClient {
     // stop at `open`.
     try {
       return wrapEntityDataset(
-        await EntityDataset.open(source, root, {
+        // `root` is a multiformats v13 CID -- this package pins ^13 so it shares
+        // a single copy with @dclimate/jaxray, whose shard decoder identifies
+        // CIDs with `instanceof`. Two copies in the tree make that check fail
+        // and every zarr read dies with "Shard entry ... is not a CID or null".
+        // tabular resolves its own v14 copy; the classes are structurally
+        // identical and v14's `CID.asCID()` accepts a v13 instance, so this is
+        // safe at runtime and only the nominal types differ. Drop the cast once
+        // both sides sit on the same multiformats major.
+        await EntityDataset.open(source, root as unknown as Parameters<typeof EntityDataset.open>[1], {
           ...(request.columnKey ? { columnKey: request.columnKey } : {}),
         })
       );
