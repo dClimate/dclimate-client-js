@@ -243,10 +243,10 @@
     "@noble/hashes" "^2.0.1"
     multiformats "^14.0.4"
 
-"@dclimate/jaxray@^0.7.0":
-  version "0.7.0"
-  resolved "https://registry.npmjs.org/@dclimate/jaxray/-/jaxray-0.7.0.tgz"
-  integrity sha512-xnRQaX72Jn0c/5S2+TtmSGE1VCjSKlqTw4mT1E/C99v0qFVwhlXed5EfzSlv0ziFVh8KnLboqfnMpeif43OHBQ==
+"@dclimate/jaxray@^0.7.2":
+  version "0.7.2"
+  resolved "https://registry.npmjs.org/@dclimate/jaxray/-/jaxray-0.7.2.tgz"
+  integrity sha512-CEmexzr1UW9PBdk5JfsrBb6KD+ZLOXpyeZ7gaSXTkLsvC6obVA86DRYZ1MPkBBod48TZoahruaGH0HEYTbrg3w==
   dependencies:
     "@ipld/dag-cbor" "^9.2.5"
     "@noble/ciphers" "^2.0.1"
