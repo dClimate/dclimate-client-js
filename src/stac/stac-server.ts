@@ -488,9 +488,12 @@ function stripIpfsScheme(cid: string | undefined): string | undefined {
  * and the day the catalogue outgrows it the truncation returns silently. The
  * link is what the server itself says comes next.
  *
- * Shares `MAX_STAC_SEARCH_PAGES` and the repeat-detection of the item search
- * above: a server that returns a `next` pointing at the page just fetched would
- * otherwise spin forever.
+ * Shares `MAX_STAC_SEARCH_PAGES`, the repeat-detection, and the origin check of
+ * the item search above: a server that returns a `next` pointing at the page
+ * just fetched would otherwise spin forever, and one pointing off-origin is
+ * refused rather than followed. Every one of those ends the walk by throwing,
+ * because each leaves the catalogue incomplete -- and an incomplete catalogue
+ * that returns normally is indistinguishable from a complete one.
  */
 async function fetchAllCollections(
   resolvedServerUrl: string
@@ -524,13 +527,33 @@ async function fetchAllCollections(
     collections.push(...(body.collections ?? []));
 
     const next = body.links?.find((link) => link.rel === "next")?.href;
-    // Resolved against the current page so a relative `next` works, and dropped
-    // if it points at another origin -- following that would be an open redirect
-    // out of the configured server.
-    url = next ? new URL(next, url).toString() : undefined;
-    if (url && new URL(url).origin !== new URL(resolvedServerUrl).origin) {
+    if (!next) {
+      // Cleared before leaving so a surviving `url` below means exactly one
+      // thing: the page budget ran out with another page still to fetch. A
+      // clean finish must not look like a truncated one.
       url = undefined;
+      break;
     }
+
+    // Resolved against the current page so a relative `next` works.
+    const parsedNext: URL = new URL(next, url);
+    // Following an off-origin link would be an open redirect out of the
+    // configured server, so it is refused -- but refused loudly. Dropping it
+    // silently would end the walk exactly like a server that said it was
+    // finished, handing back a catalogue that looks complete while the
+    // collections past this point go missing. Same rule, and same reason, as
+    // the item search's pagination-link check.
+    if (
+      normalizedOrigin(parsedNext.toString()) !==
+        normalizedOrigin(resolvedServerUrl) ||
+      parsedNext.username !== "" ||
+      parsedNext.password !== ""
+    ) {
+      throw new Error(
+        `STAC server /collections pagination link must use the configured server origin ${normalizedOrigin(resolvedServerUrl)}: ${sanitizedUrl(parsedNext)}`
+      );
+    }
+    url = parsedNext.toString();
   }
 
   // Reached only with a live `next` still in hand: the loop ran out of budget

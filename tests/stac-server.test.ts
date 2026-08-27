@@ -453,9 +453,12 @@ describe("listAvailableDatasetsFromStacServer pagination", () => {
     }
   });
 
-  it("stops rather than following rel=next to another origin", async () => {
+  it("throws rather than following rel=next to another origin", async () => {
     // A `next` pointing off-origin would walk the client out of the server it
-    // was configured with; stopping loses a page, following loses the boundary.
+    // was configured with, so it is never followed. But it is not dropped
+    // silently either: that would end the walk exactly like a server saying it
+    // was finished, returning a truncated catalogue that looks whole. Refusing
+    // the link keeps the boundary; throwing keeps the truncation visible.
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input: RequestInfo | URL) => {
@@ -481,7 +484,16 @@ describe("listAvailableDatasetsFromStacServer pagination", () => {
     try {
       await expect(
         listAvailableDatasetsFromStacServer("https://stac.example")
-      ).resolves.toBeDefined();
+      ).rejects.toThrow(/configured server origin/);
+      // The boundary held: the off-origin href was reported, never fetched.
+      // (Had it been requested, the mock would have thrown its own error.)
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String(call[0] instanceof Request ? call[0].url : call[0]).startsWith(
+            "https://evil.example"
+          )
+        )
+      ).toBe(false);
     } finally {
       fetchMock.mockRestore();
     }

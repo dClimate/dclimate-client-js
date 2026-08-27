@@ -330,4 +330,52 @@ describe("listAvailableDatasetsFromStacServer /collections pagination", () => {
       listAvailableDatasetsFromStacServer(serverUrl),
     ).rejects.toThrow(/truncated/);
   });
+
+  it("follows a next link whose host carries a fully-qualified trailing dot", async () => {
+    // `https://host./x` addresses the same server as `https://host/x`, but
+    // `URL.origin` compares them unequal. Normalizing is what keeps an
+    // in-bounds link from being refused as if it left the server.
+    const seenUrls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/collections")) {
+        seenUrls.push(url);
+        const first = !url.includes("page=2");
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            collections: [{ id: collection, title: first ? "One" : "Two" }],
+            links: first
+              ? [
+                  {
+                    rel: "next",
+                    href: `https://paginated-stac.test./collections?page=2`,
+                  },
+                ]
+              : [],
+          }),
+          text: async () => "",
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({
+          type: "FeatureCollection",
+          features: [feature(0)],
+          links: [],
+        }),
+        text: async () => "",
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      listAvailableDatasetsFromStacServer(serverUrl),
+    ).resolves.toBeDefined();
+    expect(seenUrls.some((url) => url.includes("page=2"))).toBe(true);
+  });
 });
