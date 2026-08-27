@@ -74,9 +74,12 @@ describe("client.loadEntities", () => {
     expect(load).not.toHaveBeenCalled();
   });
 
-  it("defaults columnKey to the upper-case published names", async () => {
-    // Without this the reader defaults to the schema's own lower-case field
-    // names and `TMAX` -- the name every GHCND document uses -- is unknown.
+  it("supplies no columnKey of its own", async () => {
+    // `columnKey` renames columns; it does not gate access to them. Without one
+    // every column is still readable under the schema's own field names, which
+    // are what the dataset stores and so are never wrong. A default here would
+    // be a guess at a dataset's publishing profile -- right for GHCND, silently
+    // wrong for a profile like NDBC's `.spec` feed that publishes `SwH`.
     const client = new DClimateClient();
     stubResolution(client);
     const load = vi
@@ -87,11 +90,10 @@ describe("client.loadEntities", () => {
       request: { collection: "noaa_ghcnd", dataset: "station_observations" },
     });
 
-    const { columnKey } = load.mock.calls[0]![0]!;
-    expect(columnKey?.({ name: "tmax" } as never)).toBe("TMAX");
+    expect(load.mock.calls[0]![0]!).not.toHaveProperty("columnKey");
   });
 
-  it("lets a caller override columnKey for a profile that differs", async () => {
+  it("forwards a caller's columnKey", async () => {
     const client = new DClimateClient();
     stubResolution(client);
     const load = vi

@@ -93,12 +93,16 @@ const [entities, metadata] = await client.loadEntities({
 // `metadata.commitId` identifies the snapshot this read ran against, so the
 // same one can be re-resolved later instead of whatever is newest then.
 
+// Columns are named by the schema's own field names. `columnKey` renames them
+// to a dataset's published spelling -- GHCND stores `tmax` and publishes
+// `TMAX` -- but it only changes the spelling: every column is readable either
+// way. Neither the stored dataset nor STAC states which profile a dataset uses,
+// so this is the caller's to pass rather than something to guess:
+//
+//   loadEntities({ request: { ..., columnKey: (f) => f.name.toUpperCase() } })
+//
 // To pin an exact snapshot, or to read a dataset that is not in the catalog,
-// `client.entities.load({ cid })` remains available. It takes `columnKey`,
-// which maps schema field names to published column names -- a property of the
-// dataset's profile, not the stored blocks: GHCND stores `tmax`, publishes
-// `TMAX`. `loadEntities` defaults it to upper case, which is what this catalog
-// publishes; the direct form defaults to the schema's own names.
+// `client.entities.load({ cid })` remains available and takes the same option.
 
 // Every entity, with position and coverage window.
 for (const e of await entities.listEntities()) {

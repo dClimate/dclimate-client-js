@@ -15,7 +15,7 @@ import { DEFAULT_IPFS_GATEWAY, ENTITY_DATASET_LAYOUT } from "./constants.js";
 // Type-only, like `TableField` in types.ts: naming `EntityDataset` as a return
 // type must not statically pull tabular's reader into every consumer's bundle,
 // which is the whole reason `entities.load` imports it dynamically.
-import type { EntityDataset, TableField } from "@dclimate/tabular/reader";
+import type { EntityDataset } from "@dclimate/tabular/reader";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
 import {
   DatasetNotFoundError,
@@ -107,16 +107,6 @@ function resolveZarrSelection(
   }
   return {};
 }
-
-/**
- * Published column names are upper case across this catalog's entity datasets
- * while their schema fields are lower case (`tmax` stored, `TMAX` published).
- * Hoisted to module scope rather than inlined so every call shares one function
- * identity -- the reader keys nothing on it today, but a per-call closure would
- * be a needless difference if it ever did.
- */
-const defaultEntityColumnKey = (field: TableField): string =>
-  field.name.toUpperCase();
 
 export class DClimateClient {
   private gatewayUrl: string;
@@ -311,6 +301,11 @@ export class DClimateClient {
    * against, which is what lets a caller re-resolve it later rather than
    * silently getting whatever is newest.
    *
+   * Columns are named by the schema's own field names unless `columnKey` is
+   * given. That mapping is a property of a dataset's publishing profile (GHCND
+   * stores `tmax` and publishes `TMAX`), and nothing readable from here states
+   * it, so it is the caller's to pass rather than this method's to guess.
+   *
    * @throws {DatasetNotFoundError} if the resolved item is not tabular -- a
    * gridded collection named here is a caller mistake worth reporting in terms
    * of the fix, not a manifest parse failure deep inside the reader.
@@ -356,15 +351,21 @@ export class DClimateClient {
     const dataset = await this.entities.load({
       cid: resolved.cid,
       gatewayUrl,
-      // Published column names are a property of the dataset's profile, not of
-      // the stored blocks: the schema field is `tmax` and the published column
-      // is `TMAX`. The reader's default is the identity, so without this the
-      // published names are unreachable -- `elements("TMAX")` is an unknown
-      // column on a dataset every document describes that way. Every dataset
-      // this catalog serves is published upper case, so it is the default here
-      // rather than a rule each caller has to know; an override stays available
-      // for a profile that does otherwise.
-      columnKey: request.columnKey ?? defaultEntityColumnKey,
+      // Forwarded only when given, so the reader's identity default stands.
+      //
+      // No default is supplied here, deliberately. `columnKey` renames columns;
+      // it does not gate access to them. Without one, every column is still
+      // readable under the schema's own field names -- which are what the
+      // dataset actually stores, so they are never wrong. Supplying a default
+      // would only be guessing at the spelling a dataset's publishing profile
+      // uses, and a wrong guess renames columns silently rather than failing.
+      //
+      // The profile is not derivable here either: tabular deliberately stores
+      // the schema's names rather than the writer's rendering, precisely so a
+      // reader is not bound to one profile's casing, and STAC does not carry
+      // the mapping. So a caller wanting the published spelling passes it, the
+      // same as with `entities.load({ cid })`.
+      ...(request.columnKey ? { columnKey: request.columnKey } : {}),
     });
 
     const pathParts = [
