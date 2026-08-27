@@ -338,12 +338,17 @@ export class DClimateClient {
 
     // Checked rather than assumed: the catalog holds both kinds, and the CID of
     // a Zarr store handed to the entity reader fails as a corrupt-dataset error
-    // that says nothing about the actual mistake. `layout` is absent on items
-    // published before the convention, so this only rejects an item that
-    // positively declares itself something else.
-    if (resolved.layout && resolved.layout !== ENTITY_DATASET_LAYOUT) {
+    // that says nothing about the actual mistake.
+    //
+    // Positive match, not "absent or tabular". Entity support postdates
+    // `dclimate:layout`, so an item without the field is a gridded one from
+    // before the convention -- treating absence as permission would admit
+    // exactly the Zarr items this guard exists to catch, in order to accommodate
+    // legacy entity items that cannot exist.
+    if (resolved.layout !== ENTITY_DATASET_LAYOUT) {
+      const found = resolved.layout ?? "gridded";
       throw new DatasetNotFoundError(
-        `${request.collection}/${request.dataset} is a '${resolved.layout}' dataset, not an entity dataset. Use loadDataset() for gridded data.`
+        `${request.collection}/${request.dataset} is a '${found}' dataset, not an entity dataset. Use loadDataset() for gridded data.`
       );
     }
 

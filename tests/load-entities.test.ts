@@ -54,20 +54,24 @@ describe("client.loadEntities", () => {
     ).rejects.toThrow(DatasetNotFoundError);
   });
 
-  it("accepts an item published before the layout convention", async () => {
-    // Absent is not "some other layout": items predating `dclimate:layout`
-    // should still open rather than being rejected for a field they cannot
-    // have carried.
+  it("refuses an item that declares no layout at all", async () => {
+    // Absence is not permission. Entity support postdates `dclimate:layout`, so
+    // an item without the field is a gridded one from before the convention --
+    // there is no such thing as a legacy entity dataset to accommodate. Opening
+    // it would hand a Zarr CID to the entity reader, which is the exact
+    // misleading failure this guard exists to prevent.
     const client = new DClimateClient();
     stubResolution(client, { layout: undefined });
     const load = vi
       .spyOn(client.entities, "load")
       .mockResolvedValue({} as never);
 
-    await client.loadEntities({
-      request: { collection: "noaa_ghcnd", dataset: "station_observations" },
-    });
-    expect(load).toHaveBeenCalledOnce();
+    await expect(
+      client.loadEntities({
+        request: { collection: "ecmwf_era5", dataset: "reanalysis" },
+      })
+    ).rejects.toThrow(/is a 'gridded' dataset.*loadDataset/s);
+    expect(load).not.toHaveBeenCalled();
   });
 
   it("defaults columnKey to the upper-case published names", async () => {
