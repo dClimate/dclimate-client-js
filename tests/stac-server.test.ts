@@ -2,6 +2,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   resolveCidFromStacServer,
   resolveDatasetCidFromStacServer,
+  listAvailableDatasetsFromStacServer,
   DEFAULT_STAC_SERVER_URL,
 } from "../src/stac/stac-server.js";
 
@@ -400,5 +401,101 @@ describe("STAC Server", () => {
         )
       ).rejects.toThrow();
     });
+  });
+});
+
+describe("listAvailableDatasetsFromStacServer pagination", () => {
+  it("follows rel=next instead of keeping only the first page", async () => {
+    // The failure this guards: `/collections` paginates, and a single unpaged
+    // request returns a well-formed but short list. The collections past the
+    // first page are not missing anything obvious -- they simply arrive with no
+    // title or organization, because this endpoint is the only source of both.
+    // That surfaced as a parity test failing on the 11th collection of 14.
+    const pages: Record<string, unknown> = {
+      "https://stac.example/collections": {
+        collections: [{ id: "a_one", title: "One" }],
+        links: [{ rel: "next", href: "https://stac.example/collections?offset=1" }],
+        numberMatched: 2,
+        numberReturned: 1,
+      },
+      "https://stac.example/collections?offset=1": {
+        collections: [{ id: "b_two", title: "Two" }],
+        links: [],
+        numberMatched: 2,
+        numberReturned: 1,
+      },
+    };
+    const seen: string[] = [];
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input instanceof Request ? input.url : input);
+        seen.push(url);
+        if (url in pages) {
+          return new Response(JSON.stringify(pages[url]), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        // The concurrent item search; empty is enough to reach the assertions.
+        return new Response(JSON.stringify({ features: [], links: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+    try {
+      await listAvailableDatasetsFromStacServer("https://stac.example");
+      expect(seen).toContain("https://stac.example/collections");
+      expect(seen).toContain("https://stac.example/collections?offset=1");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+
+  it("throws rather than following rel=next to another origin", async () => {
+    // A `next` pointing off-origin would walk the client out of the server it
+    // was configured with, so it is never followed. But it is not dropped
+    // silently either: that would end the walk exactly like a server saying it
+    // was finished, returning a truncated catalogue that looks whole. Refusing
+    // the link keeps the boundary; throwing keeps the truncation visible.
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: RequestInfo | URL) => {
+        const url = String(input instanceof Request ? input.url : input);
+        if (url === "https://stac.example/collections") {
+          return new Response(
+            JSON.stringify({
+              collections: [{ id: "a_one", title: "One" }],
+              links: [{ rel: "next", href: "https://evil.example/collections" }],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+        if (url.startsWith("https://evil.example")) {
+          throw new Error(`followed next off-origin: ${url}`);
+        }
+        return new Response(JSON.stringify({ features: [], links: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+    try {
+      await expect(
+        listAvailableDatasetsFromStacServer("https://stac.example")
+      ).rejects.toThrow(/configured server origin/);
+      // The boundary held: the off-origin href was reported, never fetched.
+      // (Had it been requested, the mock would have thrown its own error.)
+      expect(
+        fetchMock.mock.calls.some((call) =>
+          String(call[0] instanceof Request ? call[0].url : call[0]).startsWith(
+            "https://evil.example"
+          )
+        )
+      ).toBe(false);
+    } finally {
+      fetchMock.mockRestore();
+    }
   });
 });

@@ -52,7 +52,10 @@ describe("client.entities", () => {
     expect(client.entities).toBeDefined();
   });
 
-  it("requires a CID until catalog resolution exists", async () => {
+  // `client.loadEntities({ collection, dataset })` is the catalog-addressed
+  // entry point; `entities.load` stays the direct-CID escape hatch and still
+  // requires one.
+  it("requires a CID when addressed directly rather than by catalog", async () => {
     const client = new DClimateClient({ gatewayUrl: "http://127.0.0.1:8080" });
     await expect(
       client.entities.load({ cid: "" })

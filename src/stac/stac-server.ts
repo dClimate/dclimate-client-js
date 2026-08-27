@@ -472,6 +472,103 @@ function stripIpfsScheme(cid: string | undefined): string | undefined {
  *   - Search pagination is bounded and repeated requests are detected to avoid
  *     looping on malformed `next` links.
  */
+/**
+ * Fetch every page of `/collections`.
+ *
+ * The endpoint paginates and defaults to a page size smaller than the number of
+ * collections published, so a single unpaged request silently returns a prefix:
+ * `numberMatched` exceeds `numberReturned` and the tail is simply absent. That
+ * is invisible at the call site -- the response is a well-formed list, just a
+ * short one -- and the collections it drops lose the title and organization
+ * this endpoint is the only source of, leaving them to fall back to whatever the
+ * item search alone can say.
+ *
+ * Follows `rel="next"` rather than passing a large `limit`, because a limit only
+ * moves the cliff: it is a guess about how many collections will exist later,
+ * and the day the catalogue outgrows it the truncation returns silently. The
+ * link is what the server itself says comes next.
+ *
+ * Shares `MAX_STAC_SEARCH_PAGES`, the repeat-detection, and the origin check of
+ * the item search above: a server that returns a `next` pointing at the page
+ * just fetched would otherwise spin forever, and one pointing off-origin is
+ * refused rather than followed. Every one of those ends the walk by throwing,
+ * because each leaves the catalogue incomplete -- and an incomplete catalogue
+ * that returns normally is indistinguishable from a complete one.
+ */
+async function fetchAllCollections(
+  resolvedServerUrl: string
+): Promise<StacServerCollectionsResponse> {
+  const collections: StacServerCollectionsResponse["collections"] = [];
+  const seen = new Set<string>();
+  let url: string | undefined = `${resolvedServerUrl.replace(
+    /\/+$/,
+    ""
+  )}/collections`;
+
+  for (let page = 0; page < MAX_STAC_SEARCH_PAGES; page++) {
+    if (!url) break;
+    if (seen.has(url)) {
+      throw new Error(
+        "STAC server /collections pagination repeated a request; results truncated"
+      );
+    }
+    seen.add(url);
+
+    const response: Response = await fetch(url, { redirect: "manual" });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(
+        `STAC server /collections error ${response.status}: ${text}`
+      );
+    }
+    const body = (await response.json()) as StacServerCollectionsResponse & {
+      links?: Array<{ rel?: string; href?: string }>;
+    };
+    collections.push(...(body.collections ?? []));
+
+    const next = body.links?.find((link) => link.rel === "next")?.href;
+    if (!next) {
+      // Cleared before leaving so a surviving `url` below means exactly one
+      // thing: the page budget ran out with another page still to fetch. A
+      // clean finish must not look like a truncated one.
+      url = undefined;
+      break;
+    }
+
+    // Resolved against the current page so a relative `next` works.
+    const parsedNext: URL = new URL(next, url);
+    // Following an off-origin link would be an open redirect out of the
+    // configured server, so it is refused -- but refused loudly. Dropping it
+    // silently would end the walk exactly like a server that said it was
+    // finished, handing back a catalogue that looks complete while the
+    // collections past this point go missing. Same rule, and same reason, as
+    // the item search's pagination-link check.
+    if (
+      normalizedOrigin(parsedNext.toString()) !==
+        normalizedOrigin(resolvedServerUrl) ||
+      parsedNext.username !== "" ||
+      parsedNext.password !== ""
+    ) {
+      throw new Error(
+        `STAC server /collections pagination link must use the configured server origin ${normalizedOrigin(resolvedServerUrl)}: ${sanitizedUrl(parsedNext)}`
+      );
+    }
+    url = parsedNext.toString();
+  }
+
+  // Reached only with a live `next` still in hand: the loop ran out of budget
+  // rather than out of pages. Returning here would hand back a catalogue that
+  // looks complete, and the collections missing from it would surface later as
+  // untitled or unknown datasets rather than as this failure.
+  if (url) {
+    throw new Error(
+      `STAC server /collections pagination exceeded ${MAX_STAC_SEARCH_PAGES} pages; results truncated`
+    );
+  }
+
+  return { collections };
+}
+
 export async function listAvailableDatasetsFromStacServer(
   serverUrl: string = DEFAULT_STAC_SERVER_URL
 ): Promise<DatasetCatalog> {
@@ -486,20 +583,10 @@ export async function listAvailableDatasetsFromStacServer(
     }
     return features;
   })();
-  const [collectionsResp, searchFeatures] = await Promise.all([
-    fetch(`${resolvedServerUrl.replace(/\/+$/, "")}/collections`, {
-      redirect: "manual",
-    }),
+  const [collectionsBody, searchFeatures] = await Promise.all([
+    fetchAllCollections(resolvedServerUrl),
     searchFeaturesPromise,
   ]);
-
-  if (!collectionsResp.ok) {
-    const text = await collectionsResp.text();
-    throw new Error(
-      `STAC server /collections error ${collectionsResp.status}: ${text}`
-    );
-  }
-  const collectionsBody = (await collectionsResp.json()) as StacServerCollectionsResponse;
 
   interface CollectionAccumulator {
     title?: string;

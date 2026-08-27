@@ -83,14 +83,26 @@ degrees, ISO timestamps, chained selections.
 in GHCND, a buoy in NDBC.
 
 ```typescript
-// `columnKey` maps schema field names to the column names queries use. It is a
-// property of the dataset's publishing profile, not of the stored blocks, so
-// the caller states it: GHCND stores `tmax` and publishes `TMAX`. Without it,
-// column names default to the schema's own (lowercase, for GHCND).
-const entities = await client.entities.load({
-  cid: "bafyr4i...",
-  columnKey: (field) => field.name.toUpperCase(), // GHCND's mapping
+// Addressed through the STAC catalog, like `loadDataset`. Separate from it
+// because the two return different types: `EntityDataset` has no `point()`, and
+// its `nearest()` is async and can find nothing.
+const [entities, metadata] = await client.loadEntities({
+  request: { collection: "noaa_ghcnd", dataset: "station_observations" },
 });
+
+// `metadata.commitId` identifies the snapshot this read ran against, so the
+// same one can be re-resolved later instead of whatever is newest then.
+
+// Columns are named by the schema's own field names. `columnKey` renames them
+// to a dataset's published spelling -- GHCND stores `tmax` and publishes
+// `TMAX` -- but it only changes the spelling: every column is readable either
+// way. Neither the stored dataset nor STAC states which profile a dataset uses,
+// so this is the caller's to pass rather than something to guess:
+//
+//   loadEntities({ request: { ..., columnKey: (f) => f.name.toUpperCase() } })
+//
+// To pin an exact snapshot, or to read a dataset that is not in the catalog,
+// `client.entities.load({ cid })` remains available and takes the same option.
 
 // Every entity, with position and coverage window.
 for (const e of await entities.listEntities()) {
@@ -167,8 +179,9 @@ const rows = await range.rows(); // may be empty *because* of the gap above
 ```
 
 Reads go over the IPFS HTTP gateway, so no local daemon is required and the same
-code runs in a browser. Resolution is by CID for now; STAC catalog support will
-follow.
+code runs in a browser. Datasets resolve through the STAC catalog via
+`loadEntities`; `entities.load({ cid })` stays available for pinning an exact
+snapshot.
 
 ### Dataset version history
 

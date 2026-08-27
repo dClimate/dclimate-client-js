@@ -6,10 +6,16 @@ import {
   DatasetRequest,
   DatasetVersionRequest,
   DatasetVersionsRequest,
+  EntityDatasetRequest,
   GeoSelectionOptions,
   LoadDatasetOptions,
+  LoadEntitiesOptions,
 } from "./types.js";
-import { DEFAULT_IPFS_GATEWAY } from "./constants.js";
+import { DEFAULT_IPFS_GATEWAY, ENTITY_DATASET_LAYOUT } from "./constants.js";
+// Type-only, like `TableField` in types.ts: naming `EntityDataset` as a return
+// type must not statically pull tabular's reader into every consumer's bundle,
+// which is the whole reason `entities.load` imports it dynamically.
+import type { EntityDataset } from "@dclimate/tabular/reader";
 import { openDatasetFromCid, IpfsElements } from "./ipfs/open-dataset.js";
 import {
   DatasetNotFoundError,
@@ -275,6 +281,131 @@ export class DClimateClient {
       this.entitiesClient = new EntitiesClient({ gatewayUrl: this.gatewayUrl });
     }
     return this.entitiesClient;
+  }
+
+  /**
+   * Open an entity (point-observation) dataset by catalog name.
+   *
+   * The entity counterpart to `loadDataset`, and deliberately a separate method
+   * rather than a layout branch inside it. The two return different types with
+   * different query surfaces -- `EntityDataset` has no `point()`, its `nearest()`
+   * is async and can find nothing -- so folding them together would widen
+   * `loadDataset`'s return to a union and make every existing gridded caller
+   * narrow before it could call a Zarr method. Callers know which kind they
+   * want; the entry point says so.
+   *
+   * Resolution is the same STAC lookup `loadDataset` performs, so a dataset is
+   * addressed the same way here as anywhere else in the library, and the release
+   * metadata comes back alongside it. That matters more for entity data than for
+   * gridded: `commitId` and `streamId` identify the exact snapshot a query ran
+   * against, which is what lets a caller re-resolve it later rather than
+   * silently getting whatever is newest.
+   *
+   * Columns are named by the schema's own field names unless `columnKey` is
+   * given. That mapping is a property of a dataset's publishing profile (GHCND
+   * stores `tmax` and publishes `TMAX`), and nothing readable from here states
+   * it, so it is the caller's to pass rather than this method's to guess.
+   *
+   * @throws {DatasetNotFoundError} if the resolved item is not tabular -- a
+   * gridded collection named here is a caller mistake worth reporting in terms
+   * of the fix, not a manifest parse failure deep inside the reader.
+   */
+  async loadEntities({
+    request,
+    options = {},
+  }: {
+    request: EntityDatasetRequest;
+    options?: LoadEntitiesOptions;
+  }): Promise<[EntityDataset, DatasetMetadata]> {
+    const gatewayUrl = options.gatewayUrl ?? this.gatewayUrl;
+
+    const resolved = await this.resolveDatasetDetails(
+      {
+        collection: request.collection,
+        dataset: request.dataset,
+        ...(request.variant ? { variant: request.variant } : {}),
+        ...(request.organization
+          ? { organization: request.organization }
+          : {}),
+      },
+      gatewayUrl
+    );
+
+    // Checked rather than assumed: the catalog holds both kinds, and the CID of
+    // a Zarr store handed to the entity reader fails as a corrupt-dataset error
+    // that says nothing about the actual mistake.
+    //
+    // Positive match, not "absent or tabular". Entity support postdates
+    // `dclimate:layout`, so an item without the field is a gridded one from
+    // before the convention -- treating absence as permission would admit
+    // exactly the Zarr items this guard exists to catch, in order to accommodate
+    // legacy entity items that cannot exist.
+    if (resolved.layout !== ENTITY_DATASET_LAYOUT) {
+      const found = resolved.layout ?? "gridded";
+      throw new DatasetNotFoundError(
+        `${request.collection}/${request.dataset} is a '${found}' dataset, not an entity dataset. Use loadDataset() for gridded data.`
+      );
+    }
+
+    const metadataVariant = resolved.variant || "";
+    const dataset = await this.entities.load({
+      cid: resolved.cid,
+      gatewayUrl,
+      // Forwarded only when given, so the reader's identity default stands.
+      //
+      // No default is supplied here, deliberately. `columnKey` renames columns;
+      // it does not gate access to them. Without one, every column is still
+      // readable under the schema's own field names -- which are what the
+      // dataset actually stores, so they are never wrong. Supplying a default
+      // would only be guessing at the spelling a dataset's publishing profile
+      // uses, and a wrong guess renames columns silently rather than failing.
+      //
+      // The profile is not derivable here either: tabular deliberately stores
+      // the schema's names rather than the writer's rendering, precisely so a
+      // reader is not bound to one profile's casing, and STAC does not carry
+      // the mapping. So a caller wanting the published spelling passes it, the
+      // same as with `entities.load({ cid })`.
+      ...(request.columnKey ? { columnKey: request.columnKey } : {}),
+    });
+
+    const pathParts = [
+      resolved.collectionId,
+      resolved.dataset,
+      metadataVariant,
+    ].filter(Boolean);
+
+    const metadata: DatasetMetadata = {
+      dataset: resolved.dataset,
+      collection: resolved.collectionId,
+      variant: metadataVariant,
+      path: pathParts.join("-"),
+      cid: resolved.cid,
+      source: "stac",
+      fetchedAt: new Date(),
+      ...(resolved.organizationId
+        ? { organization: resolved.organizationId }
+        : {}),
+      ...(resolved.versionsApi ? { versionsApi: resolved.versionsApi } : {}),
+      ...(resolved.provenanceApi
+        ? { provenanceApi: resolved.provenanceApi }
+        : {}),
+      ...(resolved.citationApi ? { citationApi: resolved.citationApi } : {}),
+      ...(resolved.streamId ? { streamId: resolved.streamId } : {}),
+      ...(resolved.commitId ? { commitId: resolved.commitId } : {}),
+      ...(resolved.versionLabel ? { versionLabel: resolved.versionLabel } : {}),
+      ...(resolved.isCitable !== undefined
+        ? { isCitable: resolved.isCitable }
+        : {}),
+      ...(resolved.retentionClass
+        ? { retentionClass: resolved.retentionClass }
+        : {}),
+    };
+
+    if (!metadata.organization && metadata.collection?.includes("_")) {
+      metadata.organization = metadata.collection.split("_")[0];
+    }
+
+    return [dataset, metadata];
   }
 
   async loadDataset({
