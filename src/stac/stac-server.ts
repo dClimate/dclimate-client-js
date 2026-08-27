@@ -533,6 +533,16 @@ async function fetchAllCollections(
     }
   }
 
+  // Reached only with a live `next` still in hand: the loop ran out of budget
+  // rather than out of pages. Returning here would hand back a catalogue that
+  // looks complete, and the collections missing from it would surface later as
+  // untitled or unknown datasets rather than as this failure.
+  if (url) {
+    throw new Error(
+      `STAC server /collections pagination exceeded ${MAX_STAC_SEARCH_PAGES} pages; results truncated`
+    );
+  }
+
   return { collections };
 }
 

@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveCidFromStacServer } from "../../src/stac/stac-server.js";
+import {
+  listAvailableDatasetsFromStacServer,
+  resolveCidFromStacServer,
+} from "../../src/stac/stac-server.js";
 
 const serverUrl = "https://paginated-stac.test";
 const collection = "bigcoll";
@@ -275,5 +278,56 @@ describe("resolveCidFromStacServer pagination", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(postBodies[1]).toEqual({ limit: 100, token });
+  });
+});
+
+describe("listAvailableDatasetsFromStacServer /collections pagination", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("surfaces truncation instead of silently returning a partial catalogue", async () => {
+    // Every /collections page advertises another next link, so the walk can
+    // never terminate naturally. Returning what it had would hand back a
+    // catalogue that looks complete, with the missing collections showing up
+    // later as untitled or unknown datasets rather than as this failure.
+    let collectionsRequests = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/collections")) {
+        collectionsRequests += 1;
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          json: async () => ({
+            collections: [{ id: collection, title: "Big Collection" }],
+            links: [
+              {
+                rel: "next",
+                href: `${serverUrl}/collections?page=${collectionsRequests + 1}`,
+              },
+            ],
+          }),
+          text: async () => "",
+        } as Response;
+      }
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({
+          type: "FeatureCollection",
+          features: [feature(0)],
+          links: [],
+        }),
+        text: async () => "",
+      } as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      listAvailableDatasetsFromStacServer(serverUrl),
+    ).rejects.toThrow(/truncated/);
   });
 });

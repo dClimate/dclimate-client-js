@@ -175,8 +175,14 @@ export interface EntityDatasetRequest {
   /**
    * Override how schema fields map to published column names.
    *
-   * Defaults to upper-casing, which is what every dataset this catalog serves
-   * publishes. Pass this only for a profile that does otherwise.
+   * Without this, columns keep the schema's own field names -- what the dataset
+   * actually stores, so never wrong, but not always what its docs call them.
+   * The mapping is a property of a dataset's publishing profile (GHCND stores
+   * `tmax` and publishes `TMAX`, NDBC preserves mixed case like `SwH`) and
+   * nothing readable from the catalog states it, so no default is guessed:
+   * a wrong guess would rename columns silently rather than fail.
+   *
+   * For GHCND, pass `(field) => field.name.toUpperCase()`.
    */
   columnKey?: (field: TableField) => string;
 }
