@@ -20,9 +20,12 @@ import { DatasetNotFoundError } from "../errors.js";
  * ISO timestamps, chained selections. `EntityDataset` provides that surface, so
  * this namespace stays thin: resolve a root, hand back the dataset.
  *
- * Resolution is by CID only for now. There is no STAC equivalent for entity
- * data yet; when there is, `load` grows a `{ collection, dataset }` form
- * alongside the CID and the rest of this file is unaffected.
+ * Resolution here is by CID only. Catalog resolution lives one level up, in
+ * `DClimateClient.loadEntities`, which resolves a collection/dataset through
+ * STAC and then calls this. Keeping it there rather than adding a second form
+ * here leaves this class with one job, and leaves the direct-CID path as the
+ * way to pin an exact snapshot rather than taking whatever the catalog calls
+ * latest.
  */
 export interface EntitiesClientOptions {
   gatewayUrl: string;
@@ -90,7 +93,7 @@ export class EntitiesClient {
   async load(request: LoadEntitiesRequest): Promise<EntityDataset> {
     if (!request.cid) {
       throw new DatasetNotFoundError(
-        "An entity dataset CID is required. Catalog resolution is not available yet."
+        "An entity dataset CID is required. To address a dataset by name instead, use client.loadEntities({ request: { collection, dataset } })."
       );
     }
 

@@ -1,6 +1,9 @@
 import type { IPFSELEMENTS_INTERFACE } from "@dclimate/jaxray";
 import type { SirenOptions } from "./siren/types.js";
 import type { VersionFilters } from "./versions/types.js";
+// Type-only: erased at compile time, so this does not statically chain the main
+// entry to tabular's reader stack the way a value import would.
+import type { TableField } from "@dclimate/tabular/reader";
 
 export type IpfsElements = IPFSELEMENTS_INTERFACE;
 
@@ -150,4 +153,35 @@ export interface DatasetObject {
   attrs: Record<string, unknown>;
   dims: string[];
   sizes: Record<string, number>;
+}
+
+/**
+ * Address an entity dataset in the STAC catalog.
+ *
+ * Deliberately not `DatasetRequest`: that type carries `cid` and `resolution`,
+ * and neither applies here. A direct CID is `client.entities.load({ cid })`,
+ * which stays the escape hatch for pinning an exact snapshot, and resolution is
+ * a property of a grid that entity data does not have.
+ */
+export interface EntityDatasetRequest {
+  /** Catalog collection id, e.g. "noaa_ghcnd". */
+  collection: string;
+  /** Dataset id within the collection, e.g. "station_observations". */
+  dataset: string;
+  /** Variant to select; defaults to the catalog's preferred one. */
+  variant?: string;
+  /** Organization id, when the collection is not already prefixed with it. */
+  organization?: string;
+  /**
+   * Override how schema fields map to published column names.
+   *
+   * Defaults to upper-casing, which is what every dataset this catalog serves
+   * publishes. Pass this only for a profile that does otherwise.
+   */
+  columnKey?: (field: TableField) => string;
+}
+
+export interface LoadEntitiesOptions {
+  /** Override the client's IPFS gateway for this dataset only. */
+  gatewayUrl?: string;
 }

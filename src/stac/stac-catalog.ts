@@ -150,6 +150,15 @@ function getBooleanProperty(
 }
 
 export interface StacReleaseMetadata {
+  /**
+   * Storage layout the item advertises: "tabular" for entity (point-observation)
+   * datasets, absent or anything else for the gridded Zarr datasets that were
+   * the only kind when this type was written.
+   *
+   * This is what lets `loadEntities` refuse a Zarr collection rather than
+   * handing its CID to a reader that will fail deep inside a manifest parse.
+   */
+  layout?: string;
   versionsApi?: string;
   provenanceApi?: string;
   citationApi?: string;
@@ -164,6 +173,7 @@ export function getStacReleaseMetadata(
   properties: Record<string, unknown> | undefined
 ): StacReleaseMetadata {
   return {
+    layout: getStringProperty(properties, "dclimate:layout"),
     versionsApi: getStringProperty(properties, "dclimate:versions_api"),
     provenanceApi: getStringProperty(properties, "dclimate:provenance_api"),
     citationApi: getStringProperty(properties, "dclimate:citation_api"),
