@@ -648,6 +648,9 @@ export async function listAvailableDatasetsFromStacServer(
     const variantConfig: DatasetVariantConfig = { variant: variantName };
     if (cid) variantConfig.cid = cid;
 
+    const layout = getStringProperty(props, "dclimate:layout");
+    if (layout) variantConfig.layout = layout;
+
     const bbox = feature.bbox;
     if (Array.isArray(bbox) && bbox.length >= 4) {
       variantConfig.spatialExtent = {

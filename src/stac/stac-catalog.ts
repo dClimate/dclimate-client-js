@@ -40,6 +40,17 @@ export interface DatasetVariantConfig {
   variant: string;
   cid?: string;
   /**
+   * Storage layout the item advertises: `"tabular"` for entity
+   * (point-observation) datasets, `"zarr"` for gridded ones.
+   *
+   * Carried on the listing, not just on resolution, because it is what tells a
+   * caller which loader a dataset needs -- `loadEntities` or `loadDataset` --
+   * before committing to one. Without it a catalogue listing describes every
+   * dataset as if it were the same kind, and the only way to find out is to
+   * open one and be refused.
+   */
+  layout?: string;
+  /**
    * Priority for auto-concatenation. Lower numbers = higher priority (loaded first).
    * When multiple variants have concatPriority defined, they will be automatically
    * concatenated in priority order (1, 2, 3, ...).
@@ -928,6 +939,9 @@ export function listAvailableDatasetsFromStac(
         variant: itemVariant,
         cid,
       };
+
+      const layout = getStringProperty(item.properties, "dclimate:layout");
+      if (layout) variantEntry.layout = layout;
 
       const bbox = item.bbox;
       if (Array.isArray(bbox) && bbox.length >= 4) {

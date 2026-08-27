@@ -499,3 +499,67 @@ describe("listAvailableDatasetsFromStacServer pagination", () => {
     }
   });
 });
+
+describe("listAvailableDatasetsFromStacServer layout", () => {
+  it("carries dclimate:layout onto each variant", async () => {
+    // Without this the listing describes every dataset as the same kind, and a
+    // caller can only discover that GHCND needs `loadEntities` rather than
+    // `loadDataset` by opening it and being refused.
+    const collections = {
+      collections: [
+        { id: "noaa_ghcnd", title: "GHCNd" },
+        { id: "ecmwf_era5", title: "ERA5" },
+      ],
+    };
+    const search = {
+      features: [
+        {
+          id: "noaa_ghcnd-station_observations-default",
+          collection: "noaa_ghcnd",
+          properties: {
+            "dclimate:dataset_id": "station_observations",
+            "dclimate:variant": "default",
+            "dclimate:layout": "tabular",
+            "dclimate:latest_dataset_cid": "bafyrtabular",
+          },
+        },
+        {
+          id: "ecmwf_era5-precipitation_total-default",
+          collection: "ecmwf_era5",
+          properties: {
+            "dclimate:dataset_id": "precipitation_total",
+            "dclimate:variant": "default",
+            "dclimate:layout": "zarr",
+            "dclimate:latest_dataset_cid": "bafyrzarr",
+          },
+        },
+      ],
+      links: [],
+    };
+
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input instanceof Request ? input.url : input);
+        const body = url.includes("/collections") ? collections : search;
+        void init;
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      });
+
+    try {
+      const rows = await listAvailableDatasetsFromStacServer("https://stac.test");
+      const layoutOf = (collection: string) =>
+        rows
+          .find((row) => row.collection === collection)
+          ?.datasets[0]?.variants?.[0]?.layout;
+
+      expect(layoutOf("noaa_ghcnd")).toBe("tabular");
+      expect(layoutOf("ecmwf_era5")).toBe("zarr");
+    } finally {
+      fetchMock.mockRestore();
+    }
+  });
+});
