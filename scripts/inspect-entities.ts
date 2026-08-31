@@ -17,8 +17,9 @@
  *   --near <lat,lon>    Use the nearest station that reports every --element
  *   --max-km <n>        Fail if the nearest such station is further than this
  *   --element <name>    Restrict to one element, e.g. TMAX, TMIN, PRCP (repeatable)
- *   --from <date>       ISO date, inclusive
- *   --to <date>         ISO date, inclusive
+ *   --from <date>       ISO date or instant, inclusive
+ *   --to <date>         ISO date or instant, inclusive. A bare date covers the
+ *                       whole day; pass a time to bound to that instant.
  *   --limit <n>         Rows to print (default 10; 0 prints all). Prints only --
  *                       the reader has no limit to push down, so every matching
  *                       row is fetched regardless. Narrow the query to fetch less.
@@ -77,8 +78,11 @@ Options:
   --near <lat,lon>    Use the nearest station that reports every --element
   --max-km <n>        Fail if the nearest such station is further than this
   --element <name>    Restrict to one element, e.g. TMAX (repeatable)
-  --from <date>       ISO date, inclusive
-  --to <date>         ISO date, inclusive
+  --from <date>       ISO date or instant, inclusive
+  --to <date>         ISO date or instant, inclusive. A bare date covers the
+                      whole day, so --from X --to X returns X's rows even for
+                      sub-daily data; pass an explicit time (2026-08-20T12:00:00Z)
+                      to bound to that instant instead.
                       (passing only one widens the other to the selected
                        entities' extent; walks the index unless --entity
                        or --near narrowed the selection first)
@@ -200,6 +204,41 @@ function parseArgs(argv: string[]): Args {
 }
 
 const day = (date: Date): string => date.toISOString().slice(0, 10);
+
+/**
+ * Whether a `--from`/`--to` value names a whole calendar day rather than an instant.
+ *
+ * `2026-08-20` is a day; `2026-08-20T12:00:00Z` is an instant. The distinction
+ * decides whether `--to` may be widened to the end of that day -- see
+ * `inclusiveEnd`. Anything the caller wrote with a time in it is theirs exactly.
+ */
+const isBareDate = (value: string): boolean => /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+
+/**
+ * The last instant of a bare `--to` date, so the flag means what the help says.
+ *
+ * `--to` is documented as inclusive, and for a daily dataset it already was:
+ * GHCND stamps every observation at midnight, so a range ending at
+ * `2026-08-20T00:00:00Z` contains that day's row. Sub-daily data breaks that
+ * silently. METAR observes hourly, so `--from 2026-08-20 --to 2026-08-20` built
+ * the zero-width range `[00:00, 00:00]` and returned **no rows at all** for a day
+ * with 24 of them -- an empty result that looks like "this station reported
+ * nothing" rather than "your range excluded everything".
+ *
+ * So a bare date extends to the final millisecond of itself. A value carrying an
+ * explicit time is passed through untouched: someone who wrote `T12:00:00Z` means
+ * noon, and quietly stretching it to midnight would break the precise queries this
+ * flag also has to serve.
+ */
+const inclusiveEnd = (value: string): string | Date => {
+  if (!isBareDate(value)) return value;
+  const ms = Date.parse(`${value.trim()}T00:00:00Z`);
+  if (Number.isNaN(ms)) return value;
+  // 23:59:59.999 rather than the next midnight: an end-exclusive reading of the
+  // following day would be identical here, but the library treats the bound as
+  // inclusive, so the next day's 00:00 observation would be pulled in.
+  return new Date(ms + 86_400_000 - 1);
+};
 
 function describeEntity(entity: EntityInfo): string {
   const where =
@@ -327,7 +366,9 @@ async function applySelection(
     // covered extent rather than forcing the caller to pass both. A query that
     // supplies both bounds never reads coverage at all.
     let start: Date | string = args.from ?? "";
-    let end: Date | string = args.to ?? "";
+    // A bare `--to` date covers the whole day, so the flag is inclusive for
+    // sub-daily data as well as daily. See `inclusiveEnd`.
+    let end: Date | string = args.to === null ? "" : inclusiveEnd(args.to);
     if (!args.from || !args.to) {
       // Scoped to whatever --entity/--near already picked, for both reasons:
       // widening from every entity would stretch the range to one no selected
@@ -375,6 +416,8 @@ async function applySelection(
       }
       if (!args.from) start = new Date(earliest);
       if (!args.to) end = new Date(latest);
+      // `latest` is the newest observation itself, so no widening is needed here:
+      // an inclusive bound on that exact instant already includes it.
     }
     selected = selected.timeRange({ start, end });
   }
